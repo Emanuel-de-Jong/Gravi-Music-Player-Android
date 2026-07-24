@@ -20,6 +20,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -242,6 +243,8 @@ class PlaybackService : Service() {
         val currentPlayer = player ?: return
         if (currentPlayer.isPlaying) {
             pausePlayback(currentPlayer)
+        } else if (waitingForSilenceAnalysis) {
+            return
         } else {
             currentPlayer.play()
             snapshot = snapshot.copy(isPlaying = true, positionMs = safePosition(currentPlayer))
@@ -360,9 +363,12 @@ class PlaybackService : Service() {
     private fun requestSilenceBoundaries(playbackItem: AudioItem, request: Int) {
         waitingForSilenceAnalysis = true
         serviceScope.launch {
+            val deadlineMs = SystemClock.elapsedRealtime() + SILENCE_ANALYSIS_TIMEOUT_MS
             val boundaries = withContext(Dispatchers.IO) {
                 silenceAnalyzer?.analyze(playbackItem.uri) {
-                    request != silenceAnalysisRequest || !skipSilenceEnabled
+                    request != silenceAnalysisRequest ||
+                            !skipSilenceEnabled ||
+                            SystemClock.elapsedRealtime() >= deadlineMs
                 } ?: SilenceBoundaries()
             }
             if (request != silenceAnalysisRequest || !skipSilenceEnabled) return@launch
@@ -678,6 +684,7 @@ class PlaybackService : Service() {
         private const val ACTION_NEXT = "com.example.gravimusicplayer.NEXT"
         private const val ACTION_PREVIOUS = "com.example.gravimusicplayer.PREVIOUS"
         private const val ACTION_STOP = "com.example.gravimusicplayer.STOP"
+        private const val SILENCE_ANALYSIS_TIMEOUT_MS = 500L
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(

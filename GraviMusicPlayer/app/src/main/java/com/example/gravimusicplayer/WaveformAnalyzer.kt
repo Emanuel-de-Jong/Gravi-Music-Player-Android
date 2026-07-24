@@ -61,13 +61,15 @@ class WaveformAnalyzer(private val context: Context) {
             val outputFormat = decoder.outputFormat
             val sampleRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
             estimatedTotalFrames = (durationUs * sampleRate / 1_000_000L).coerceAtLeast(1L)
+            val frameStride = (estimatedTotalFrames / TARGET_ANALYZED_FRAMES).coerceAtLeast(1L)
             decodeWaveform(
                 extractor,
                 decoder,
                 shouldCancel,
                 peaks,
                 frameIndex,
-                estimatedTotalFrames
+                estimatedTotalFrames,
+                frameStride,
             )
         } finally {
             decoder?.runCatching { stop() }
@@ -83,6 +85,7 @@ class WaveformAnalyzer(private val context: Context) {
         peaks: FloatArray,
         initialFrameIndex: Long,
         estimatedTotalFrames: Long,
+        frameStride: Long,
     ): List<Float> {
         val bufferInfo = MediaCodec.BufferInfo()
         var inputEnded = false
@@ -124,17 +127,22 @@ class WaveformAnalyzer(private val context: Context) {
 
                 else -> if (outputIndex >= 0) {
                     val outputBuffer = decoder.getOutputBuffer(outputIndex) ?: return emptyList()
-                    frameIndex = readWaveformBuffer(
-                        outputBuffer,
-                        bufferInfo,
-                        channelCount,
-                        encoding,
-                        peaks,
-                        frameIndex,
-                        estimatedTotalFrames,
-                    ) ?: return emptyList()
-                    outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                    decoder.releaseOutputBuffer(outputIndex, false)
+                    try {
+                        frameIndex = readWaveformBuffer(
+                            outputBuffer,
+                            bufferInfo,
+                            channelCount,
+                            encoding,
+                            peaks,
+                            frameIndex,
+                            estimatedTotalFrames,
+                            frameStride,
+                            shouldCancel,
+                        ) ?: return emptyList()
+                        outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                    } finally {
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                    }
                 }
             }
         }
@@ -152,8 +160,11 @@ class WaveformAnalyzer(private val context: Context) {
         peaks: FloatArray,
         initialFrameIndex: Long,
         estimatedTotalFrames: Long,
+        frameStride: Long,
+        shouldCancel: () -> Boolean,
     ): Long? {
         var frameIndex = initialFrameIndex
+        var checkedFrameCount = 0
         val buffer = outputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         buffer.position(bufferInfo.offset)
         buffer.limit(bufferInfo.offset + bufferInfo.size)
@@ -162,29 +173,37 @@ class WaveformAnalyzer(private val context: Context) {
         when (encoding) {
             2 -> {
                 while (buffer.remaining() >= safeChannelCount * 2) {
-                    var framePeak = 0f
-                    repeat(safeChannelCount) {
-                        framePeak = maxOf(framePeak, kotlin.math.abs(buffer.short / 32768f))
+                    if (checkedFrameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
+
+                    if (frameIndex % frameStride == 0L) {
+                        var framePeak = 0f
+                        repeat(safeChannelCount) {
+                            framePeak = maxOf(framePeak, kotlin.math.abs(buffer.short / 32768f))
+                        }
+                        val bucketIndex = bucketIndex(frameIndex, estimatedTotalFrames)
+                        peaks[bucketIndex] = maxOf(peaks[bucketIndex], framePeak)
+                    } else {
+                        buffer.position(buffer.position() + safeChannelCount * 2)
                     }
-                    peaks[bucketIndex(frameIndex, estimatedTotalFrames)] = maxOf(
-                        peaks[bucketIndex(frameIndex, estimatedTotalFrames)],
-                        framePeak,
-                    )
                     frameIndex++
                 }
             }
 
             4 -> {
                 while (buffer.remaining() >= safeChannelCount * 4) {
-                    var framePeak = 0f
-                    repeat(safeChannelCount) {
-                        framePeak =
-                            maxOf(framePeak, kotlin.math.abs(buffer.float.coerceIn(-1f, 1f)))
+                    if (checkedFrameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
+
+                    if (frameIndex % frameStride == 0L) {
+                        var framePeak = 0f
+                        repeat(safeChannelCount) {
+                            framePeak =
+                                maxOf(framePeak, kotlin.math.abs(buffer.float.coerceIn(-1f, 1f)))
+                        }
+                        val bucketIndex = bucketIndex(frameIndex, estimatedTotalFrames)
+                        peaks[bucketIndex] = maxOf(peaks[bucketIndex], framePeak)
+                    } else {
+                        buffer.position(buffer.position() + safeChannelCount * 4)
                     }
-                    peaks[bucketIndex(frameIndex, estimatedTotalFrames)] = maxOf(
-                        peaks[bucketIndex(frameIndex, estimatedTotalFrames)],
-                        framePeak,
-                    )
                     frameIndex++
                 }
             }
@@ -280,6 +299,8 @@ class WaveformAnalyzer(private val context: Context) {
     companion object {
         private const val TIMEOUT_US = 10_000L
         private const val BUCKET_COUNT = 400
+        private const val TARGET_ANALYZED_FRAMES = BUCKET_COUNT * 8L
+        private const val CANCEL_CHECK_FRAME_INTERVAL = 4096
         private const val ANALYSIS_VERSION = 1
         private const val MAX_CACHE_ENTRIES = 500
     }

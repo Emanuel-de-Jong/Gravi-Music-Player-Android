@@ -100,20 +100,24 @@ class SilenceAnalyzer(private val context: Context) {
 
                 else -> if (outputIndex >= 0) {
                     val outputBuffer = decoder.getOutputBuffer(outputIndex) ?: return null
-                    val result = readPcmLevels(
-                        outputBuffer,
-                        bufferInfo,
-                        channelCount,
-                        encoding,
-                        samplesPerWindow,
-                        windowSquareSum,
-                        windowSampleCount,
-                        levels,
-                    ) ?: return null
-                    windowSquareSum = result.squareSum
-                    windowSampleCount = result.sampleCount
-                    outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                    decoder.releaseOutputBuffer(outputIndex, false)
+                    try {
+                        val result = readPcmLevels(
+                            outputBuffer,
+                            bufferInfo,
+                            channelCount,
+                            encoding,
+                            samplesPerWindow,
+                            windowSquareSum,
+                            windowSampleCount,
+                            levels,
+                            shouldCancel,
+                        ) ?: return null
+                        windowSquareSum = result.squareSum
+                        windowSampleCount = result.sampleCount
+                        outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                    } finally {
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                    }
                 }
             }
         }
@@ -134,9 +138,11 @@ class SilenceAnalyzer(private val context: Context) {
         initialSquareSum: Double,
         initialSampleCount: Int,
         levels: MutableList<Double>,
+        shouldCancel: () -> Boolean,
     ): WindowState? {
         var squareSum = initialSquareSum
         var sampleCount = initialSampleCount
+        var frameCount = 0
         val buffer = outputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         buffer.position(bufferInfo.offset)
         buffer.limit(bufferInfo.offset + bufferInfo.size)
@@ -145,6 +151,7 @@ class SilenceAnalyzer(private val context: Context) {
         when (encoding) {
             2 -> {
                 while (buffer.remaining() >= safeChannelCount * 2) {
+                    if (frameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
                     var frameValue = 0.0
                     repeat(safeChannelCount) {
                         frameValue += buffer.short / 32768.0
@@ -162,6 +169,7 @@ class SilenceAnalyzer(private val context: Context) {
 
             4 -> {
                 while (buffer.remaining() >= safeChannelCount * 4) {
+                    if (frameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
                     var frameValue = 0.0
                     repeat(safeChannelCount) {
                         frameValue += buffer.float.toDouble().coerceIn(-1.0, 1.0)
@@ -229,5 +237,6 @@ class SilenceAnalyzer(private val context: Context) {
         private const val WINDOW_DURATION_MS = 100
         private const val RETAINED_SILENCE_MS = 1500
         private const val SILENCE_THRESHOLD = 0.003
+        private const val CANCEL_CHECK_FRAME_INTERVAL = 4096
     }
 }

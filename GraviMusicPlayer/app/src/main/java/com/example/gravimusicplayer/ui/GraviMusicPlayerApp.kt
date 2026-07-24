@@ -43,6 +43,8 @@ import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.TagGroup
 import com.example.gravimusicplayer.WaveformAnalyzer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -87,6 +89,7 @@ fun GraviMusicPlayerApp() {
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
     var waveformUriString by remember { mutableStateOf<String?>(null) }
     var waveformValues by remember { mutableStateOf(emptyList<Float>()) }
+    var waveformRequestId by remember { mutableIntStateOf(0) }
 
     val folderPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -230,12 +233,14 @@ fun GraviMusicPlayerApp() {
         waveformValues = emptyList()
         if (currentItem != null) {
             val requestUriString = currentItem.uriString
+            val requestId = ++waveformRequestId
             val values = withContext(Dispatchers.IO) {
+                val coroutineContext = currentCoroutineContext()
                 waveformAnalyzer.waveform(currentItem) {
-                    waveformUriString != requestUriString
+                    !coroutineContext.isActive
                 }
             }
-            if (waveformUriString == requestUriString) {
+            if (waveformUriString == requestUriString && waveformRequestId == requestId) {
                 waveformValues = values
             }
         }

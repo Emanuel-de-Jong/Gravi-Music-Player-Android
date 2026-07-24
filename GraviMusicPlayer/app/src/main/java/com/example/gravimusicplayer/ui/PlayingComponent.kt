@@ -52,6 +52,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -262,6 +263,9 @@ private fun WaveformSlider(
         modifier = Modifier
             .fillMaxWidth()
             .height(48.dp)
+            .onSizeChanged { size ->
+                widthPx = size.width.coerceAtLeast(1)
+            }
             .pointerInput(enabled, durationMs, widthPx) {
                 detectTapGestures { offset -> seekFromX(offset.x) }
             }
@@ -269,7 +273,6 @@ private fun WaveformSlider(
                 detectDragGestures { change, _ -> seekFromX(change.position.x) }
             }
     ) {
-        widthPx = size.width.toInt().coerceAtLeast(1)
         val centerY = size.height / 2f
         val maxBarHeight = size.height * 0.9f
         val barStep = size.width / values.size.coerceAtLeast(1)
