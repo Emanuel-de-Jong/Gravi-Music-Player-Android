@@ -35,25 +35,41 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PlaybackService : Service() {
     private val binder = PlaybackBinder()
     private val handler = Handler(Looper.getMainLooper())
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var audioManager: AudioManager
     private var player: ExoPlayer? = null
     private var mediaSession: MediaSessionCompat? = null
     private var listener: ((PlaybackSnapshot) -> Unit)? = null
     private var snapshot = PlaybackSnapshot()
     private var connectedBluetoothOutputDeviceIds = emptySet<Int>()
+    private var silenceAnalyzer: SilenceAnalyzer? = null
+    private var skipSilenceEnabled = true
+    private var silenceAnalysisRequest = 0
+    private var trimStartPositionMs = 0
+    private var trimEndPositionMs: Int? = null
+    private var handlingTrimmedEnd = false
+    private var waitingForSilenceAnalysis = false
 
     private val progressUpdater = object : Runnable {
         override fun run() {
             player?.let {
+                val currentPosition = safePosition(it)
                 snapshot = snapshot.copy(
-                    positionMs = safePosition(it),
+                    positionMs = currentPosition,
                     durationMs = safeDuration(it),
                 )
                 notifyListener()
+                handleTrimmedEndIfNeeded(currentPosition)
             }
             handler.postDelayed(this, 500)
         }
@@ -94,6 +110,7 @@ class PlaybackService : Service() {
         audioManager = getSystemService(AudioManager::class.java)
         createNotificationChannel()
         player = buildPlayer()
+        silenceAnalyzer = SilenceAnalyzer(this)
         player?.addListener(playbackListener)
         mediaSession = MediaSessionCompat(this, "Gravi Music Player").apply {
             setFlags(
@@ -151,6 +168,7 @@ class PlaybackService : Service() {
         handler.removeCallbacks(progressUpdater)
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         unregisterReceiver(becomingNoisyReceiver)
+        serviceScope.cancel()
         player?.release()
         mediaSession?.release()
         super.onDestroy()
@@ -284,6 +302,25 @@ class PlaybackService : Service() {
         notifyListener()
     }
 
+    fun setSkipSilenceEnabled(enabled: Boolean) {
+        skipSilenceEnabled = enabled
+        if (!enabled) {
+            silenceAnalysisRequest++
+            trimStartPositionMs = 0
+            trimEndPositionMs = null
+            handlingTrimmedEnd = false
+            if (waitingForSilenceAnalysis) {
+                waitingForSilenceAnalysis = false
+                player?.play()
+                snapshot =
+                    snapshot.copy(isPlaying = true, positionMs = safePosition(player ?: return))
+                updateMediaSession()
+                updateForegroundNotification()
+                notifyListener()
+            }
+        }
+    }
+
     private fun playIndex(index: Int) {
         val item = snapshot.queue.getOrNull(index) ?: return
         val currentPlayer = player ?: return
@@ -295,11 +332,15 @@ class PlaybackService : Service() {
         currentPlayer.clearMediaItems()
         currentPlayer.setMediaItem(MediaItem.fromUri(playbackItem.uri))
         currentPlayer.prepare()
-        currentPlayer.play()
+        silenceAnalysisRequest++
+        trimStartPositionMs = 0
+        trimEndPositionMs = null
+        handlingTrimmedEnd = false
+        waitingForSilenceAnalysis = false
         snapshot = snapshot.copy(
             queue = updatedQueue,
             currentIndex = index,
-            isPlaying = true,
+            isPlaying = false,
             positionMs = 0,
             durationMs = playbackItem.durationMs?.toInt() ?: 0,
             audioInfoText = playbackItem.compactAudioInfo(),
@@ -309,9 +350,54 @@ class PlaybackService : Service() {
         updateMediaSession()
         updateForegroundNotification()
         notifyListener()
+        if (skipSilenceEnabled) {
+            requestSilenceBoundaries(playbackItem, silenceAnalysisRequest)
+        } else {
+            startPlayback(0, null)
+        }
+    }
+
+    private fun requestSilenceBoundaries(playbackItem: AudioItem, request: Int) {
+        waitingForSilenceAnalysis = true
+        serviceScope.launch {
+            val boundaries = withContext(Dispatchers.IO) {
+                silenceAnalyzer?.analyze(playbackItem.uri) {
+                    request != silenceAnalysisRequest || !skipSilenceEnabled
+                } ?: SilenceBoundaries()
+            }
+            if (request != silenceAnalysisRequest || !skipSilenceEnabled) return@launch
+
+            waitingForSilenceAnalysis = false
+            startPlayback(boundaries.startPositionMs, boundaries.endPositionMs)
+        }
+    }
+
+    private fun startPlayback(startPositionMs: Int, endPositionMs: Int?) {
+        val currentPlayer = player ?: return
+        trimStartPositionMs = startPositionMs
+        trimEndPositionMs = endPositionMs
+        handlingTrimmedEnd = false
+        if (startPositionMs > 0) {
+            currentPlayer.seekTo(startPositionMs.toLong())
+        }
+        currentPlayer.play()
+        snapshot = snapshot.copy(
+            isPlaying = true,
+            positionMs = safePosition(currentPlayer),
+            durationMs = safeDuration(currentPlayer),
+            errorMessage = null,
+        )
+        updateMediaSession()
+        updateForegroundNotification()
+        notifyListener()
     }
 
     private fun stopPlayback() {
+        silenceAnalysisRequest++
+        trimStartPositionMs = 0
+        trimEndPositionMs = null
+        handlingTrimmedEnd = false
+        waitingForSilenceAnalysis = false
         player?.stop()
         player?.clearMediaItems()
         mediaSession?.isActive = false
@@ -372,6 +458,11 @@ class PlaybackService : Service() {
     }
 
     private fun handlePlaybackEnded() {
+        silenceAnalysisRequest++
+        trimStartPositionMs = 0
+        trimEndPositionMs = null
+        handlingTrimmedEnd = false
+        waitingForSilenceAnalysis = false
         if (snapshot.loopMode == LoopMode.SONG) {
             playIndex(snapshot.currentIndex)
             return
@@ -386,6 +477,15 @@ class PlaybackService : Service() {
         } else {
             playIndex(nextIndex)
         }
+    }
+
+    private fun handleTrimmedEndIfNeeded(positionMs: Int) {
+        val endPositionMs = trimEndPositionMs ?: return
+        if (!snapshot.isPlaying || handlingTrimmedEnd || positionMs < endPositionMs) return
+
+        handlingTrimmedEnd = true
+        player?.pause()
+        handlePlaybackEnded()
     }
 
     private fun getNextIndex(): Int? {

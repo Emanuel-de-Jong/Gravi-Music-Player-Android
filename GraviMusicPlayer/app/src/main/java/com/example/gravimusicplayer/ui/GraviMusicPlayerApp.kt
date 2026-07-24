@@ -41,6 +41,7 @@ import com.example.gravimusicplayer.PlayerPreferences
 import com.example.gravimusicplayer.QueueOrder
 import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.TagGroup
+import com.example.gravimusicplayer.WaveformAnalyzer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -50,6 +51,7 @@ import kotlinx.coroutines.withContext
 fun GraviMusicPlayerApp() {
     val context = LocalContext.current
     val libraryRepository = remember(context) { LibraryRepository(context) }
+    val waveformAnalyzer = remember(context) { WaveformAnalyzer(context) }
     val graviQueuePicker = remember { GraviQueuePicker() }
     val preferences = remember(context) { PlayerPreferences(context) }
     val coroutineScope = rememberCoroutineScope()
@@ -78,10 +80,13 @@ fun GraviMusicPlayerApp() {
     var appliedGenreSeparator by rememberSaveable { mutableStateOf(preferences.genreSeparator) }
     var showBrowserThumbnails by rememberSaveable { mutableStateOf(preferences.showBrowserThumbnails) }
     var queueSearchResults by rememberSaveable { mutableStateOf(preferences.queueSearchResults) }
+    var skipSilenceEnabled by rememberSaveable { mutableStateOf(preferences.skipSilenceEnabled) }
     var graviPickerSettings by remember { mutableStateOf(preferences.graviPickerSettings) }
     var pendingPlaylistExport by remember { mutableStateOf<List<AudioItem>?>(null) }
     var isFolderActionRunning by remember { mutableStateOf(false) }
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
+    var waveformUriString by remember { mutableStateOf<String?>(null) }
+    var waveformValues by remember { mutableStateOf(emptyList<Float>()) }
 
     val folderPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -123,6 +128,7 @@ fun GraviMusicPlayerApp() {
                 val boundService = (service as PlaybackService.PlaybackBinder).getService()
                 playbackService = boundService
                 boundService.setLoopMode(savedLoopMode)
+                boundService.setSkipSilenceEnabled(skipSilenceEnabled)
                 playbackSnapshot = boundService.getSnapshot()
                 boundService.setListener { playbackSnapshot = it }
                 pendingPlaybackRequest?.let {
@@ -214,6 +220,27 @@ fun GraviMusicPlayerApp() {
         }
     }
 
+    LaunchedEffect(
+        playbackSnapshot.currentItem?.uriString,
+        playbackSnapshot.currentItem?.lastModifiedMs,
+        playbackSnapshot.currentItem?.sizeBytes,
+    ) {
+        val currentItem = playbackSnapshot.currentItem
+        waveformUriString = currentItem?.uriString
+        waveformValues = emptyList()
+        if (currentItem != null) {
+            val requestUriString = currentItem.uriString
+            val values = withContext(Dispatchers.IO) {
+                waveformAnalyzer.waveform(currentItem) {
+                    waveformUriString != requestUriString
+                }
+            }
+            if (waveformUriString == requestUriString) {
+                waveformValues = values
+            }
+        }
+    }
+
     AppScaffold(
         currentDestination = currentDestination,
         isGeneratingCache = isGeneratingCache,
@@ -241,6 +268,9 @@ fun GraviMusicPlayerApp() {
                     onPlayQueueIndex = { playbackService?.playQueueIndex(it) },
                     onShuffleQueue = { playbackService?.shuffleQueue() },
                     showThumbnails = showBrowserThumbnails,
+                    waveformValues = waveformValues.takeIf {
+                        waveformUriString == playbackSnapshot.currentItem?.uriString
+                    }.orEmpty(),
                     onLoopModeChanged = {
                         savedLoopMode = it
                         preferences.loopMode = it
@@ -495,6 +525,7 @@ fun GraviMusicPlayerApp() {
                                 genreSeparator = genreSeparator,
                                 showBrowserThumbnails = showBrowserThumbnails,
                                 queueSearchResults = queueSearchResults,
+                                skipSilenceEnabled = skipSilenceEnabled,
                                 graviPickerSettings = graviPickerSettings,
                                 onChooseFolder = { folderPicker.launch(null) },
                                 onDefaultStartPlayOrderChanged = {
@@ -519,6 +550,11 @@ fun GraviMusicPlayerApp() {
                                     queueSearchResults = it
                                     preferences.queueSearchResults = it
                                 },
+                                onSkipSilenceEnabledChanged = {
+                                    skipSilenceEnabled = it
+                                    preferences.skipSilenceEnabled = it
+                                    playbackService?.setSkipSilenceEnabled(it)
+                                },
                                 onGraviPickerSettingsChanged = {
                                     graviPickerSettings = it
                                     preferences.graviPickerSettings = it
@@ -531,13 +567,17 @@ fun GraviMusicPlayerApp() {
                                     appliedGenreSeparator = preferences.genreSeparator
                                     showBrowserThumbnails = preferences.showBrowserThumbnails
                                     queueSearchResults = preferences.queueSearchResults
+                                    skipSilenceEnabled = preferences.skipSilenceEnabled
                                     graviPickerSettings = preferences.graviPickerSettings
                                     playbackService?.setLoopMode(savedLoopMode)
+                                    playbackService?.setSkipSilenceEnabled(skipSilenceEnabled)
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++
                                 },
                                 onClearCaches = {
                                     libraryRepository.clearAllCaches(rootUriString)
+                                    waveformAnalyzer.clearCache()
+                                    waveformValues = emptyList()
                                     browserEntries = emptyList()
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++

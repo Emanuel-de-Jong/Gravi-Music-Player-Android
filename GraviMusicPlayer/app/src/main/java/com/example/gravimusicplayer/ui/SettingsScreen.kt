@@ -45,6 +45,7 @@ fun SettingsScreen(
     genreSeparator: String,
     showBrowserThumbnails: Boolean,
     queueSearchResults: Boolean,
+    skipSilenceEnabled: Boolean,
     graviPickerSettings: GraviPickerSettings,
     onChooseFolder: () -> Unit,
     onDefaultStartPlayOrderChanged: (DefaultStartPlayOrder) -> Unit,
@@ -52,6 +53,7 @@ fun SettingsScreen(
     onApplyGenreSeparator: (String) -> Unit,
     onShowBrowserThumbnailsChanged: (Boolean) -> Unit,
     onQueueSearchResultsChanged: (Boolean) -> Unit,
+    onSkipSilenceEnabledChanged: (Boolean) -> Unit,
     onGraviPickerSettingsChanged: (GraviPickerSettings) -> Unit,
     onResetSettings: () -> Unit,
     onClearCaches: () -> Unit,
@@ -87,6 +89,12 @@ fun SettingsScreen(
             checked = queueSearchResults,
             infoText = "When enabled, opening a song in folder search queues all song results. When disabled, it queues songs in the selected song's folder and subfolders.",
             onCheckedChanged = onQueueSearchResultsChanged,
+        )
+        SwitchSettingRow(
+            label = "Shorten trailing and leading silences",
+            checked = skipSilenceEnabled,
+            infoText = "Reduces more than 1.5 seconds of near-silent/static padding to 1.5 seconds. Quiet musical intros/outros are kept.",
+            onCheckedChanged = onSkipSilenceEnabledChanged,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -342,6 +350,7 @@ fun SettingsScreenPreview() {
             genreSeparator = ";",
             showBrowserThumbnails = false,
             queueSearchResults = true,
+            skipSilenceEnabled = true,
             graviPickerSettings = GraviPickerSettings(),
             onChooseFolder = {},
             onDefaultStartPlayOrderChanged = {},
@@ -349,6 +358,7 @@ fun SettingsScreenPreview() {
             onApplyGenreSeparator = {},
             onShowBrowserThumbnailsChanged = {},
             onQueueSearchResultsChanged = {},
+            onSkipSilenceEnabledChanged = {},
             onGraviPickerSettingsChanged = {},
             onResetSettings = {},
             onClearCaches = {},

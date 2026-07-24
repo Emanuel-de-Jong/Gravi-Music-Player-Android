@@ -1,12 +1,16 @@
 package com.example.gravimusicplayer.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -44,6 +48,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -119,6 +126,7 @@ fun PlayScreen(
     onPlayQueueIndex: (Int) -> Unit,
     onShuffleQueue: () -> Unit,
     showThumbnails: Boolean,
+    waveformValues: List<Float>,
     onLoopModeChanged: (LoopMode) -> Unit,
 ) {
     val item = snapshot.currentItem
@@ -157,13 +165,23 @@ fun PlayScreen(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Slider(
-            value = snapshot.positionMs.toFloat()
-                .coerceIn(0f, snapshot.durationMs.toFloat().coerceAtLeast(1f)),
-            onValueChange = { onSeek(it.toInt()) },
-            valueRange = 0f..snapshot.durationMs.toFloat().coerceAtLeast(1f),
-            enabled = snapshot.durationMs > 0,
-        )
+        if (waveformValues.isEmpty()) {
+            Slider(
+                value = snapshot.positionMs.toFloat()
+                    .coerceIn(0f, snapshot.durationMs.toFloat().coerceAtLeast(1f)),
+                onValueChange = { onSeek(it.toInt()) },
+                valueRange = 0f..snapshot.durationMs.toFloat().coerceAtLeast(1f),
+                enabled = snapshot.durationMs > 0,
+            )
+        } else {
+            WaveformSlider(
+                values = waveformValues,
+                positionMs = snapshot.positionMs,
+                durationMs = snapshot.durationMs,
+                onSeek = onSeek,
+                enabled = snapshot.durationMs > 0,
+            )
+        }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(formatTime(snapshot.positionMs), style = MaterialTheme.typography.bodySmall)
             Text(
@@ -213,6 +231,68 @@ fun PlayScreen(
             onPlayQueueIndex = onPlayQueueIndex,
             showThumbnails = showThumbnails,
             modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun WaveformSlider(
+    values: List<Float>,
+    positionMs: Int,
+    durationMs: Int,
+    onSeek: (Int) -> Unit,
+    enabled: Boolean,
+) {
+    var widthPx by remember { mutableIntStateOf(1) }
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val mutedColor = MaterialTheme.colorScheme.surfaceVariant
+    val cursorColor = MaterialTheme.colorScheme.onSurface
+    val playedFraction = if (durationMs > 0) {
+        positionMs.toFloat() / durationMs.toFloat()
+    } else {
+        0f
+    }.coerceIn(0f, 1f)
+    val seekFromX = { x: Float ->
+        if (enabled && durationMs > 0) {
+            onSeek((x.coerceIn(0f, widthPx.toFloat()) / widthPx * durationMs).toInt())
+        }
+    }
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .pointerInput(enabled, durationMs, widthPx) {
+                detectTapGestures { offset -> seekFromX(offset.x) }
+            }
+            .pointerInput(enabled, durationMs, widthPx) {
+                detectDragGestures { change, _ -> seekFromX(change.position.x) }
+            }
+    ) {
+        widthPx = size.width.toInt().coerceAtLeast(1)
+        val centerY = size.height / 2f
+        val maxBarHeight = size.height * 0.9f
+        val barStep = size.width / values.size.coerceAtLeast(1)
+        val strokeWidth = (barStep * 0.7f).coerceIn(1f, 4f)
+        values.forEachIndexed { index, value ->
+            val x = index * barStep + barStep / 2f
+            val barHeight = (value.coerceIn(0f, 1f) * maxBarHeight).coerceAtLeast(2f)
+            val color =
+                if (index.toFloat() / values.size <= playedFraction) primaryColor else mutedColor
+            drawLine(
+                color = color,
+                start = Offset(x, centerY - barHeight / 2f),
+                end = Offset(x, centerY + barHeight / 2f),
+                strokeWidth = strokeWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+        val cursorX = size.width * playedFraction
+        drawLine(
+            color = cursorColor,
+            start = Offset(cursorX, 0f),
+            end = Offset(cursorX, size.height),
+            strokeWidth = 2f,
         )
     }
 }
@@ -506,6 +586,7 @@ fun PlayScreenPreview() {
             onPlayQueueIndex = {},
             onShuffleQueue = {},
             showThumbnails = false,
+            waveformValues = emptyList(),
             onLoopModeChanged = {},
         )
     }

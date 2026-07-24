@@ -265,6 +265,7 @@ class LibraryRepository(private val context: Context) {
             metadataCacheFile?.releaseDate,
             metadataCacheFile?.lyrics,
             lastModifiedMs,
+            sizeBytes,
             metadataCacheFile?.metadataTitle,
         )
     }
