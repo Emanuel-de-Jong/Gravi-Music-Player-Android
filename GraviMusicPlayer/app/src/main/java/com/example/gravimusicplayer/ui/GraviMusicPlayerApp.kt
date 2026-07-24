@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -93,6 +96,7 @@ fun GraviMusicPlayerApp() {
     var waveformValues by remember { mutableStateOf(emptyList<Float>()) }
     var waveformRequestId by remember { mutableIntStateOf(0) }
     var pendingPerformanceExport by remember { mutableStateOf<String?>(null) }
+    var isPerformanceExporting by remember { mutableStateOf(false) }
 
     val folderPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -128,13 +132,20 @@ fun GraviMusicPlayerApp() {
             }
         }
     val performanceExporter =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
             val report = pendingPerformanceExport
             pendingPerformanceExport = null
             if (uri != null && report != null) {
-                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                    outputStream.write(report.toByteArray(Charsets.UTF_8))
+                coroutineScope.launch(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(report.toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        isPerformanceExporting = false
+                    }
                 }
+            } else {
+                isPerformanceExporting = false
             }
         }
 
@@ -601,14 +612,23 @@ fun GraviMusicPlayerApp() {
                                     cacheGenerationRequest++
                                 },
                                 onClearPerformanceData = {
-                                    performanceProfiler.clearData()
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        performanceProfiler.clearData()
+                                    }
                                 },
                                 onExportPerformanceData = {
+                                    isPerformanceExporting = true
                                     coroutineScope.launch(Dispatchers.IO) {
-                                        val report = performanceProfiler.exportReport()
+                                        val report = runCatching {
+                                            performanceProfiler.exportReport()
+                                        }.getOrNull()
                                         withContext(Dispatchers.Main) {
-                                            pendingPerformanceExport = report
-                                            performanceExporter.launch("gravi-performance-data.csv")
+                                            if (report != null) {
+                                                pendingPerformanceExport = report
+                                                performanceExporter.launch("gravi-performance-data.json")
+                                            } else {
+                                                isPerformanceExporting = false
+                                            }
                                         }
                                     }
                                 },
@@ -623,6 +643,14 @@ fun GraviMusicPlayerApp() {
                         onNext = { playbackService?.playNext() },
                     )
                 }
+            }
+            if (isPerformanceExporting) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    confirmButton = {},
+                    title = { Text("Saving debug data") },
+                    text = { CircularProgressIndicator() },
+                )
             }
         }
     }
