@@ -31,7 +31,7 @@ class PlayerPreferences(context: Context) {
         }
 
     var showBrowserThumbnails: Boolean
-        get() = preferences.getBoolean(KEY_SHOW_BROWSER_THUMBNAILS, false)
+        get() = preferences.getBoolean(KEY_SHOW_BROWSER_THUMBNAILS, true)
         set(value) {
             preferences.edit { putBoolean(KEY_SHOW_BROWSER_THUMBNAILS, value) }
         }
@@ -43,7 +43,7 @@ class PlayerPreferences(context: Context) {
         }
 
     var skipSilenceEnabled: Boolean
-        get() = preferences.getBoolean(KEY_SKIP_SILENCE_ENABLED, false)
+        get() = preferences.getBoolean(KEY_SKIP_SILENCE_ENABLED, true)
         set(value) {
             preferences.edit { putBoolean(KEY_SKIP_SILENCE_ENABLED, value) }
         }
@@ -51,7 +51,7 @@ class PlayerPreferences(context: Context) {
     var graviPickerSettings: GraviPickerSettings
         get() = GraviPickerSettings(
             depth = preferences.getInt(KEY_GRAVI_DEPTH, 2),
-            parentOdds = preferences.getBoolean(KEY_GRAVI_PARENT_ODDS, false),
+            parentOdds = preferences.getBoolean(KEY_GRAVI_PARENT_ODDS, true),
             childOdds = preferences.getBoolean(KEY_GRAVI_CHILD_ODDS, true),
             evenOddsMinFileCount = preferences.getInt(KEY_GRAVI_EVEN_ODDS_MIN_FILE_COUNT, 5),
             lessLikelyDivisor = preferences.getFloat(KEY_GRAVI_LESS_LIKELY_DIVISOR, 2f),

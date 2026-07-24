@@ -2,7 +2,7 @@ package com.example.gravimusicplayer
 
 data class GraviPickerSettings(
     val depth: Int = 2,
-    val parentOdds: Boolean = false,
+    val parentOdds: Boolean = true,
     val childOdds: Boolean = true,
     val evenOddsMinFileCount: Int = 5,
     val lessLikelyDivisor: Float = 2f,

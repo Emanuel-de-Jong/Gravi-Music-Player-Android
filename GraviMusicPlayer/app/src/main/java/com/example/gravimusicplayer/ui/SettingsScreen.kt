@@ -368,7 +368,7 @@ fun SettingsScreenPreview() {
             rootUriString = null,
             defaultStartPlayOrder = DefaultStartPlayOrder.ORDERED,
             genreSeparator = ";",
-            showBrowserThumbnails = false,
+            showBrowserThumbnails = true,
             queueSearchResults = true,
             skipSilenceEnabled = true,
             graviPickerSettings = GraviPickerSettings(),
