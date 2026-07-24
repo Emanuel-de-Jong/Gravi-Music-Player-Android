@@ -11,26 +11,27 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class WaveformAnalyzer(private val context: Context) {
-    fun waveform(item: AudioItem, shouldCancel: () -> Boolean): List<Float> {
-        val cache = loadCache()
-        cache.entries.firstOrNull { it.matches(item) }?.let {
-            return it.values
-        }
+    private val performanceProfiler = PerformanceProfiler.get(context)
 
-        val values = runCatching { computeWaveform(item, shouldCancel) }.getOrNull().orEmpty()
-        if (values.isNotEmpty() && !shouldCancel()) {
-            val updatedEntries =
-                (cache.entries.filterNot { it.uriString == item.uriString } + WaveformCacheEntry(
-                    item.uriString,
-                    item.lastModifiedMs,
-                    item.sizeBytes,
-                    ANALYSIS_VERSION,
-                    System.currentTimeMillis(),
-                    values,
-                )).sortedByDescending { it.updatedAtMs }.take(MAX_CACHE_ENTRIES)
-            saveCache(WaveformCacheFile(updatedEntries))
+    fun waveform(item: AudioItem, shouldCancel: () -> Boolean): List<Float> {
+        return performanceProfiler.measure("WaveformAnalyzer.waveform") {
+            val cache = loadCache()
+            cache.entries.firstOrNull { it.matches(item) }?.let { return@measure it.values }
+            val values = runCatching { computeWaveform(item, shouldCancel) }.getOrNull().orEmpty()
+            if (values.isNotEmpty() && !shouldCancel()) {
+                val updatedEntries =
+                    (cache.entries.filterNot { it.uriString == item.uriString } + WaveformCacheEntry(
+                        item.uriString,
+                        item.lastModifiedMs,
+                        item.sizeBytes,
+                        ANALYSIS_VERSION,
+                        System.currentTimeMillis(),
+                        values,
+                    )).sortedByDescending { it.updatedAtMs }.take(MAX_CACHE_ENTRIES)
+                saveCache(WaveformCacheFile(updatedEntries))
+            }
+            values
         }
-        return values
     }
 
     fun clearCache() {

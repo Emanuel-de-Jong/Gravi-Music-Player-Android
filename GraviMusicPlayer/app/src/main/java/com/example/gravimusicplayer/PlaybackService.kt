@@ -60,6 +60,7 @@ class PlaybackService : Service() {
     private var trimEndPositionMs: Int? = null
     private var handlingTrimmedEnd = false
     private var waitingForSilenceAnalysis = false
+    private val performanceProfiler by lazy { PerformanceProfiler.get(this) }
 
     private val progressUpdater = object : Runnable {
         override fun run() {
@@ -132,23 +133,25 @@ class PlaybackService : Service() {
 
     @androidx.annotation.OptIn(UnstableApi::class)
     private fun buildPlayer(): ExoPlayer {
-        val audioAttributes = AudioAttributes.Builder()
-            .setUsage(C.USAGE_MEDIA)
-            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
-            .setAllowedCapturePolicy(C.ALLOW_CAPTURE_BY_NONE)
-            .build()
-        val offloadPreferences = TrackSelectionParameters.AudioOffloadPreferences.Builder()
-            .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
-            .setIsGaplessSupportRequired(false)
-            .setIsSpeedChangeSupportRequired(false)
-            .build()
-        return ExoPlayer.Builder(this).build().apply {
-            trackSelectionParameters = trackSelectionParameters
-                .buildUpon()
-                .setAudioOffloadPreferences(offloadPreferences)
+        return performanceProfiler.measure("PlaybackService.buildPlayer") {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setAllowedCapturePolicy(C.ALLOW_CAPTURE_BY_NONE)
                 .build()
-            setAudioAttributes(audioAttributes, true)
-            skipSilenceEnabled = false
+            val offloadPreferences = TrackSelectionParameters.AudioOffloadPreferences.Builder()
+                .setAudioOffloadMode(TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
+                .setIsGaplessSupportRequired(false)
+                .setIsSpeedChangeSupportRequired(false)
+                .build()
+            ExoPlayer.Builder(this).build().apply {
+                trackSelectionParameters = trackSelectionParameters
+                    .buildUpon()
+                    .setAudioOffloadPreferences(offloadPreferences)
+                    .build()
+                setAudioAttributes(audioAttributes, true)
+                skipSilenceEnabled = false
+            }
         }
     }
 
@@ -325,38 +328,40 @@ class PlaybackService : Service() {
     }
 
     private fun playIndex(index: Int) {
-        val item = snapshot.queue.getOrNull(index) ?: return
-        val currentPlayer = player ?: return
-        val playbackItem = readPlaybackMetadata(item)
-        val updatedQueue = snapshot.queue.toMutableList().apply {
-            this[index] = playbackItem
-        }
-        currentPlayer.stop()
-        currentPlayer.clearMediaItems()
-        currentPlayer.setMediaItem(MediaItem.fromUri(playbackItem.uri))
-        currentPlayer.prepare()
-        silenceAnalysisRequest++
-        trimStartPositionMs = 0
-        trimEndPositionMs = null
-        handlingTrimmedEnd = false
-        waitingForSilenceAnalysis = false
-        snapshot = snapshot.copy(
-            queue = updatedQueue,
-            currentIndex = index,
-            isPlaying = false,
-            positionMs = 0,
-            durationMs = playbackItem.durationMs?.toInt() ?: 0,
-            audioInfoText = playbackItem.compactAudioInfo(),
-            errorMessage = null
-        )
-        mediaSession?.isActive = true
-        updateMediaSession()
-        updateForegroundNotification()
-        notifyListener()
-        if (skipSilenceEnabled) {
-            requestSilenceBoundaries(playbackItem, silenceAnalysisRequest)
-        } else {
-            startPlayback(0, null)
+        performanceProfiler.measure("PlaybackService.playIndex") {
+            val item = snapshot.queue.getOrNull(index) ?: return@measure
+            val currentPlayer = player ?: return@measure
+            val playbackItem = readPlaybackMetadata(item)
+            val updatedQueue = snapshot.queue.toMutableList().apply {
+                this[index] = playbackItem
+            }
+            currentPlayer.stop()
+            currentPlayer.clearMediaItems()
+            currentPlayer.setMediaItem(MediaItem.fromUri(playbackItem.uri))
+            currentPlayer.prepare()
+            silenceAnalysisRequest++
+            trimStartPositionMs = 0
+            trimEndPositionMs = null
+            handlingTrimmedEnd = false
+            waitingForSilenceAnalysis = false
+            snapshot = snapshot.copy(
+                queue = updatedQueue,
+                currentIndex = index,
+                isPlaying = false,
+                positionMs = 0,
+                durationMs = playbackItem.durationMs?.toInt() ?: 0,
+                audioInfoText = playbackItem.compactAudioInfo(),
+                errorMessage = null
+            )
+            mediaSession?.isActive = true
+            updateMediaSession()
+            updateForegroundNotification()
+            notifyListener()
+            if (skipSilenceEnabled) {
+                requestSilenceBoundaries(playbackItem, silenceAnalysisRequest)
+            } else {
+                startPlayback(0, null)
+            }
         }
     }
 
@@ -365,11 +370,13 @@ class PlaybackService : Service() {
         serviceScope.launch {
             val deadlineMs = SystemClock.elapsedRealtime() + SILENCE_ANALYSIS_TIMEOUT_MS
             val boundaries = withContext(Dispatchers.IO) {
-                silenceAnalyzer?.analyze(playbackItem.uri) {
-                    request != silenceAnalysisRequest ||
-                            !skipSilenceEnabled ||
-                            SystemClock.elapsedRealtime() >= deadlineMs
-                } ?: SilenceBoundaries()
+                performanceProfiler.measure("PlaybackService.requestSilenceBoundaries") {
+                    silenceAnalyzer?.analyze(playbackItem.uri) {
+                        request != silenceAnalysisRequest ||
+                                !skipSilenceEnabled ||
+                                SystemClock.elapsedRealtime() >= deadlineMs
+                    } ?: SilenceBoundaries()
+                }
             }
             if (request != silenceAnalysisRequest || !skipSilenceEnabled) return@launch
 
@@ -602,32 +609,36 @@ class PlaybackService : Service() {
     }
 
     private fun loadArtworkBitmap(artworkUriString: String?): Bitmap? {
-        val uriString = artworkUriString ?: return null
-        return runCatching {
-            contentResolver.openInputStream(uriString.toUri())?.use { inputStream ->
-                BitmapFactory.decodeStream(inputStream)
-            }
-        }.getOrNull()
+        return performanceProfiler.measure("PlaybackService.loadArtworkBitmap") {
+            val uriString = artworkUriString ?: return@measure null
+            runCatching {
+                contentResolver.openInputStream(uriString.toUri())?.use { inputStream ->
+                    BitmapFactory.decodeStream(inputStream)
+                }
+            }.getOrNull()
+        }
     }
 
     private fun readPlaybackMetadata(item: AudioItem): AudioItem {
         if (item.mimeType != null && item.bitrate != null && item.durationMs != null && item.lyrics != null) return item
 
-        val retriever = MediaMetadataRetriever()
-        return try {
-            runCatching {
-                retriever.setDataSource(this, item.uri)
-                item.copy(
-                    mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE),
-                    bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
-                        ?.toIntOrNull(),
-                    durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                        ?.toLongOrNull(),
-                    lyrics = Mp3LyricsReader.readLyrics(this, item.uri),
-                )
-            }.getOrDefault(item)
-        } finally {
-            retriever.release()
+        return performanceProfiler.measure("PlaybackService.readPlaybackMetadata") {
+            val retriever = MediaMetadataRetriever()
+            try {
+                runCatching {
+                    retriever.setDataSource(this, item.uri)
+                    item.copy(
+                        mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE),
+                        bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                            ?.toIntOrNull(),
+                        durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                            ?.toLongOrNull(),
+                        lyrics = Mp3LyricsReader.readLyrics(this, item.uri),
+                    )
+                }.getOrDefault(item)
+            } finally {
+                retriever.release()
+            }
         }
     }
 

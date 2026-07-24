@@ -35,6 +35,7 @@ import com.example.gravimusicplayer.DefaultStartPlayOrder
 import com.example.gravimusicplayer.GraviQueuePicker
 import com.example.gravimusicplayer.LibraryRepository
 import com.example.gravimusicplayer.PendingPlaybackRequest
+import com.example.gravimusicplayer.PerformanceProfiler
 import com.example.gravimusicplayer.PlaybackService
 import com.example.gravimusicplayer.PlaybackSnapshot
 import com.example.gravimusicplayer.PlayerPreferences
@@ -54,8 +55,9 @@ fun GraviMusicPlayerApp() {
     val context = LocalContext.current
     val libraryRepository = remember(context) { LibraryRepository(context) }
     val waveformAnalyzer = remember(context) { WaveformAnalyzer(context) }
-    val graviQueuePicker = remember { GraviQueuePicker() }
+    val graviQueuePicker = remember(context) { GraviQueuePicker(context) }
     val preferences = remember(context) { PlayerPreferences(context) }
+    val performanceProfiler = remember(context) { PerformanceProfiler.get(context) }
     val coroutineScope = rememberCoroutineScope()
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.FOLDERS) }
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
@@ -90,6 +92,7 @@ fun GraviMusicPlayerApp() {
     var waveformUriString by remember { mutableStateOf<String?>(null) }
     var waveformValues by remember { mutableStateOf(emptyList<Float>()) }
     var waveformRequestId by remember { mutableIntStateOf(0) }
+    var pendingPerformanceExport by remember { mutableStateOf<String?>(null) }
 
     val folderPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -122,6 +125,16 @@ fun GraviMusicPlayerApp() {
             pendingPlaylistExport = null
             if (uri != null && exportItems != null) {
                 writeM3u8Playlist(context, uri, exportItems)
+            }
+        }
+    val performanceExporter =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+            val report = pendingPerformanceExport
+            pendingPerformanceExport = null
+            if (uri != null && report != null) {
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    outputStream.write(report.toByteArray(Charsets.UTF_8))
+                }
             }
         }
 
@@ -586,6 +599,18 @@ fun GraviMusicPlayerApp() {
                                     browserEntries = emptyList()
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++
+                                },
+                                onClearPerformanceData = {
+                                    performanceProfiler.clearData()
+                                },
+                                onExportPerformanceData = {
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        val report = performanceProfiler.exportReport()
+                                        withContext(Dispatchers.Main) {
+                                            pendingPerformanceExport = report
+                                            performanceExporter.launch("gravi-performance-data.csv")
+                                        }
+                                    }
                                 },
                             )
                         }

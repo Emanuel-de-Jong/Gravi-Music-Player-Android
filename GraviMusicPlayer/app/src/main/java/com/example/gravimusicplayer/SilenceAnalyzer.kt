@@ -15,9 +15,13 @@ data class SilenceBoundaries(
 )
 
 class SilenceAnalyzer(private val context: Context) {
+    private val performanceProfiler = PerformanceProfiler.get(context)
+
     fun analyze(uri: Uri, shouldCancel: () -> Boolean): SilenceBoundaries {
-        return runCatching { decodeLevels(uri, shouldCancel)?.let(::boundariesFromLevels) }
-            .getOrNull() ?: SilenceBoundaries()
+        return performanceProfiler.measure("SilenceAnalyzer.analyze") {
+            runCatching { decodeLevels(uri, shouldCancel)?.let(::boundariesFromLevels) }
+                .getOrNull() ?: SilenceBoundaries()
+        }
     }
 
     private fun decodeLevels(uri: Uri, shouldCancel: () -> Boolean): List<Double>? {

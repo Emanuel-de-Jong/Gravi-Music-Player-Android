@@ -1,46 +1,52 @@
 package com.example.gravimusicplayer
 
+import android.content.Context
 import kotlin.random.Random
 
 class GraviQueuePicker(
+    context: Context,
     private val random: Random = Random.Default,
 ) {
+    private val performanceProfiler = PerformanceProfiler.get(context)
+
     fun buildGraviQueue(
         items: List<AudioItem>,
         settings: GraviPickerSettings,
         scopeFolderPath: String = "",
     ): List<AudioItem> {
-        val safeSettings = settings.sanitized()
-        val categoryEntries = buildCategoryEntries(items, safeSettings, scopeFolderPath)
-        if (categoryEntries.isEmpty()) return emptyList()
+        return performanceProfiler.measure("GraviQueuePicker.buildGraviQueue") {
+            val safeSettings = settings.sanitized()
+            val categoryEntries = buildCategoryEntries(items, safeSettings, scopeFolderPath)
+            if (categoryEntries.isEmpty()) return@measure emptyList()
 
-        val allItems = categoryEntries
-            .flatMap { it.items }
-            .distinctBy { it.audioItem.uriString }
-            .sortedBy { it.audioItem.folderPath + "/" + it.audioItem.title }
-        val allUriStrings = allItems.map { it.audioItem.uriString }
-        val remainingUriStrings = allUriStrings.toMutableSet()
-        val selectedItems = mutableListOf<AudioItem>()
+            val allItems = categoryEntries
+                .flatMap { it.items }
+                .distinctBy { it.audioItem.uriString }
+                .sortedBy { it.audioItem.folderPath + "/" + it.audioItem.title }
+            val allUriStrings = allItems.map { it.audioItem.uriString }
+            val remainingUriStrings = allUriStrings.toMutableSet()
+            val selectedItems = mutableListOf<AudioItem>()
 
-        while (selectedItems.size < safeSettings.queueEntries) {
-            if (remainingUriStrings.isEmpty()) {
-                remainingUriStrings.addAll(allUriStrings)
+            while (selectedItems.size < safeSettings.queueEntries) {
+                if (remainingUriStrings.isEmpty()) {
+                    remainingUriStrings.addAll(allUriStrings)
+                }
+
+                val eligibleCategoryEntries = categoryEntries.filter { categoryEntry ->
+                    categoryEntry.items.any { it.audioItem.uriString in remainingUriStrings }
+                }
+                if (eligibleCategoryEntries.isEmpty()) break
+
+                val selectedCategory = pickWeighted(eligibleCategoryEntries) { it.weight }
+                val selectedItem = pickWeighted(
+                    selectedCategory.items.filter { it.audioItem.uriString in remainingUriStrings }
+                ) { selectedCategory.itemWeightsByUri[it.audioItem.uriString] ?: 1.0 }
+                remainingUriStrings.remove(selectedItem.audioItem.uriString)
+                selectedItems.add(selectedItem.audioItem)
             }
 
-            val eligibleCategoryEntries = categoryEntries.filter { categoryEntry ->
-                categoryEntry.items.any { it.audioItem.uriString in remainingUriStrings }
-            }
-            if (eligibleCategoryEntries.isEmpty()) break
-
-            val selectedCategory = pickWeighted(eligibleCategoryEntries) { it.weight }
-            val selectedItem = pickWeighted(
-                selectedCategory.items.filter { it.audioItem.uriString in remainingUriStrings }
-            ) { selectedCategory.itemWeightsByUri[it.audioItem.uriString] ?: 1.0 }
-            remainingUriStrings.remove(selectedItem.audioItem.uriString)
-            selectedItems.add(selectedItem.audioItem)
+            selectedItems
         }
-
-        return selectedItems
     }
 
     fun shuffleQueue(items: List<AudioItem>): List<AudioItem> {

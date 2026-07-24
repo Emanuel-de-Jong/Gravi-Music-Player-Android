@@ -57,6 +57,8 @@ fun SettingsScreen(
     onGraviPickerSettingsChanged: (GraviPickerSettings) -> Unit,
     onResetSettings: () -> Unit,
     onClearCaches: () -> Unit,
+    onClearPerformanceData: () -> Unit,
+    onExportPerformanceData: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
 
@@ -201,6 +203,24 @@ fun SettingsScreen(
                 modifier = Modifier.weight(1f),
             ) {
                 Text("Reset settings")
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Button(
+                onClick = onClearPerformanceData,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Clear debug data")
+            }
+            Button(
+                onClick = onExportPerformanceData,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Save debug data")
             }
         }
     }
@@ -362,6 +382,8 @@ fun SettingsScreenPreview() {
             onGraviPickerSettingsChanged = {},
             onResetSettings = {},
             onClearCaches = {},
+            onClearPerformanceData = {},
+            onExportPerformanceData = {},
         )
     }
 }
