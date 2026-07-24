@@ -444,7 +444,6 @@ private fun QueueList(
     var queueSearchQuery by rememberSaveable { mutableStateOf("") }
     var lastQueueIndex by rememberSaveable { mutableIntStateOf(snapshot.currentIndex) }
     val listState = rememberLazyListState()
-    val shouldShowThumbnails = showThumbnails && snapshot.queue.size <= MAX_THUMBNAIL_QUEUE_SIZE
     val displayedQueueItems = snapshot.queue.withIndex()
         .filter { queueItem ->
             queueSearchQuery.isBlank() || queueItem.value.matchesQueueSearch(
@@ -515,7 +514,7 @@ private fun QueueList(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (shouldShowThumbnails) {
+                        if (showThumbnails) {
                             ArtworkImage(
                                 artworkUriString = queueItem.artworkUriString,
                                 modifier = Modifier.size(36.dp),
@@ -594,5 +593,3 @@ fun PlayScreenPreview() {
         )
     }
 }
-
-private const val MAX_THUMBNAIL_QUEUE_SIZE = 500

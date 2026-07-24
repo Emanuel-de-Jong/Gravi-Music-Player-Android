@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
-import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -18,7 +17,7 @@ class WaveformAnalyzer(private val context: Context) {
             return it.values
         }
 
-        val values = runCatching { computeWaveform(item.uri, shouldCancel) }.getOrNull().orEmpty()
+        val values = runCatching { computeWaveform(item, shouldCancel) }.getOrNull().orEmpty()
         if (values.isNotEmpty() && !shouldCancel()) {
             val updatedEntries =
                 (cache.entries.filterNot { it.uriString == item.uriString } + WaveformCacheEntry(
@@ -38,39 +37,27 @@ class WaveformAnalyzer(private val context: Context) {
         cacheFile().delete()
     }
 
-    private fun computeWaveform(uri: Uri, shouldCancel: () -> Boolean): List<Float> {
+    private fun computeWaveform(item: AudioItem, shouldCancel: () -> Boolean): List<Float> {
         val peaks = FloatArray(BUCKET_COUNT)
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
-        var frameIndex = 0L
-        var estimatedTotalFrames = 0L
         return try {
-            extractor.setDataSource(context, uri, null)
+            extractor.setDataSource(context, item.uri, null)
             val trackIndex = findAudioTrackIndex(extractor) ?: return emptyList()
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mimeType = inputFormat.getString(MediaFormat.KEY_MIME) ?: return emptyList()
             val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
                 inputFormat.getLong(MediaFormat.KEY_DURATION)
             } else {
-                0L
+                item.durationMs?.times(1000) ?: 0L
             }
+            if (durationUs <= 0L) return emptyList()
+
             extractor.selectTrack(trackIndex)
             decoder = MediaCodec.createDecoderByType(mimeType)
             decoder.configure(inputFormat, null, null, 0)
             decoder.start()
-            val outputFormat = decoder.outputFormat
-            val sampleRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
-            estimatedTotalFrames = (durationUs * sampleRate / 1_000_000L).coerceAtLeast(1L)
-            val frameStride = (estimatedTotalFrames / TARGET_ANALYZED_FRAMES).coerceAtLeast(1L)
-            decodeWaveform(
-                extractor,
-                decoder,
-                shouldCancel,
-                peaks,
-                frameIndex,
-                estimatedTotalFrames,
-                frameStride,
-            )
+            decodeWaveform(extractor, decoder, shouldCancel, peaks, durationUs)
         } finally {
             decoder?.runCatching { stop() }
             decoder?.release()
@@ -83,9 +70,7 @@ class WaveformAnalyzer(private val context: Context) {
         decoder: MediaCodec,
         shouldCancel: () -> Boolean,
         peaks: FloatArray,
-        initialFrameIndex: Long,
-        estimatedTotalFrames: Long,
-        frameStride: Long,
+        durationUs: Long,
     ): List<Float> {
         val bufferInfo = MediaCodec.BufferInfo()
         var inputEnded = false
@@ -93,7 +78,6 @@ class WaveformAnalyzer(private val context: Context) {
         var outputFormat = decoder.outputFormat
         var channelCount = outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
         var encoding = outputFormat.getIntegerOrDefault(MediaFormat.KEY_PCM_ENCODING, 2)
-        var frameIndex = initialFrameIndex
 
         while (!outputEnded && !shouldCancel()) {
             if (!inputEnded) {
@@ -128,17 +112,18 @@ class WaveformAnalyzer(private val context: Context) {
                 else -> if (outputIndex >= 0) {
                     val outputBuffer = decoder.getOutputBuffer(outputIndex) ?: return emptyList()
                     try {
-                        frameIndex = readWaveformBuffer(
-                            outputBuffer,
-                            bufferInfo,
-                            channelCount,
-                            encoding,
-                            peaks,
-                            frameIndex,
-                            estimatedTotalFrames,
-                            frameStride,
-                            shouldCancel,
-                        ) ?: return emptyList()
+                        if (!readWaveformBuffer(
+                                outputBuffer,
+                                bufferInfo,
+                                channelCount,
+                                encoding,
+                                peaks,
+                                durationUs,
+                                shouldCancel,
+                            )
+                        ) {
+                            return emptyList()
+                        }
                         outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     } finally {
                         decoder.releaseOutputBuffer(outputIndex, false)
@@ -148,8 +133,7 @@ class WaveformAnalyzer(private val context: Context) {
         }
 
         if (shouldCancel()) return emptyList()
-        val maxPeak = peaks.maxOrNull()?.takeIf { it > 0f } ?: return emptyList()
-        return peaks.map { (it / maxPeak).coerceIn(0f, 1f) }
+        return normalizePeaks(peaks)
     }
 
     private fun readWaveformBuffer(
@@ -158,64 +142,55 @@ class WaveformAnalyzer(private val context: Context) {
         channelCount: Int,
         encoding: Int,
         peaks: FloatArray,
-        initialFrameIndex: Long,
-        estimatedTotalFrames: Long,
-        frameStride: Long,
+        durationUs: Long,
         shouldCancel: () -> Boolean,
-    ): Long? {
-        var frameIndex = initialFrameIndex
-        var checkedFrameCount = 0
+    ): Boolean {
         val buffer = outputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         buffer.position(bufferInfo.offset)
         buffer.limit(bufferInfo.offset + bufferInfo.size)
         val safeChannelCount = channelCount.coerceAtLeast(1)
+        val bucketIndex = (bufferInfo.presentationTimeUs * BUCKET_COUNT / durationUs).toInt()
+            .coerceIn(0, BUCKET_COUNT - 1)
+        var frameIndex = 0
 
         when (encoding) {
             2 -> {
                 while (buffer.remaining() >= safeChannelCount * 2) {
-                    if (checkedFrameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
+                    if (frameIndex++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return false
 
-                    if (frameIndex % frameStride == 0L) {
-                        var framePeak = 0f
-                        repeat(safeChannelCount) {
-                            framePeak = maxOf(framePeak, kotlin.math.abs(buffer.short / 32768f))
-                        }
-                        val bucketIndex = bucketIndex(frameIndex, estimatedTotalFrames)
-                        peaks[bucketIndex] = maxOf(peaks[bucketIndex], framePeak)
-                    } else {
-                        buffer.position(buffer.position() + safeChannelCount * 2)
+                    var framePeak = 0f
+                    repeat(safeChannelCount) {
+                        framePeak = maxOf(framePeak, kotlin.math.abs(buffer.short / 32768f))
                     }
-                    frameIndex++
+                    peaks[bucketIndex] = maxOf(peaks[bucketIndex], framePeak)
                 }
             }
 
             4 -> {
                 while (buffer.remaining() >= safeChannelCount * 4) {
-                    if (checkedFrameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
+                    if (frameIndex++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return false
 
-                    if (frameIndex % frameStride == 0L) {
-                        var framePeak = 0f
-                        repeat(safeChannelCount) {
-                            framePeak =
-                                maxOf(framePeak, kotlin.math.abs(buffer.float.coerceIn(-1f, 1f)))
-                        }
-                        val bucketIndex = bucketIndex(frameIndex, estimatedTotalFrames)
-                        peaks[bucketIndex] = maxOf(peaks[bucketIndex], framePeak)
-                    } else {
-                        buffer.position(buffer.position() + safeChannelCount * 4)
+                    var framePeak = 0f
+                    repeat(safeChannelCount) {
+                        framePeak =
+                            maxOf(framePeak, kotlin.math.abs(buffer.float.coerceIn(-1f, 1f)))
                     }
-                    frameIndex++
+                    peaks[bucketIndex] = maxOf(peaks[bucketIndex], framePeak)
                 }
             }
 
-            else -> return null
+            else -> return false
         }
-        return frameIndex
+        return true
     }
 
-    private fun bucketIndex(frameIndex: Long, estimatedTotalFrames: Long): Int {
-        return (frameIndex * BUCKET_COUNT / estimatedTotalFrames).toInt()
-            .coerceIn(0, BUCKET_COUNT - 1)
+    private fun normalizePeaks(peaks: FloatArray): List<Float> {
+        val minPeak = peaks.minOrNull() ?: return emptyList()
+        val maxPeak = peaks.maxOrNull() ?: return emptyList()
+        val range = maxPeak - minPeak
+        if (range <= 0f) return peaks.map { 0f }
+
+        return peaks.map { ((it - minPeak) / range).coerceIn(0f, 1f) }
     }
 
     private fun findAudioTrackIndex(extractor: MediaExtractor): Int? {
@@ -298,10 +273,9 @@ class WaveformAnalyzer(private val context: Context) {
 
     companion object {
         private const val TIMEOUT_US = 10_000L
-        private const val BUCKET_COUNT = 400
-        private const val TARGET_ANALYZED_FRAMES = BUCKET_COUNT * 8L
+        private const val BUCKET_COUNT = 100
         private const val CANCEL_CHECK_FRAME_INTERVAL = 4096
-        private const val ANALYSIS_VERSION = 1
+        private const val ANALYSIS_VERSION = 5
         private const val MAX_CACHE_ENTRIES = 500
     }
 }

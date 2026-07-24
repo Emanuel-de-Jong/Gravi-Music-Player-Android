@@ -635,9 +635,19 @@ private fun browserSortKey(entry: BrowserEntry, sortMode: BrowserSortMode): Comp
         ?: entry.name.lowercase()
 
         BrowserSortMode.DURATION -> item?.durationMs ?: 0L
-        BrowserSortMode.RELEASE_DATE -> item?.releaseDate.orEmpty().lowercase()
+        BrowserSortMode.RELEASE_DATE -> item?.releaseDate.releaseDateSortKey()
         BrowserSortMode.ADDITION_DATE -> item?.lastModifiedMs ?: 0L
     }
+}
+
+private fun String?.releaseDateSortKey(): Long {
+    val digits = orEmpty().filter { it.isDigit() }
+    if (digits.length < 4) return 0L
+
+    val year = digits.take(4)
+    val month = digits.drop(4).take(2).ifBlank { "00" }
+    val day = digits.drop(6).take(2).ifBlank { "00" }
+    return "$year$month$day".toLongOrNull() ?: 0L
 }
 
 private fun folderQueueName(folderStack: List<String>): String {
