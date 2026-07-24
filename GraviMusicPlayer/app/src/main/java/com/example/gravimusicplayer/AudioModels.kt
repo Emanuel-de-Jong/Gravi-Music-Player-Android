@@ -16,6 +16,7 @@ data class AudioItem(
     val releaseDate: String? = null,
     val lyrics: String? = null,
     val lastModifiedMs: Long = 0,
+    val metadataTitle: String? = null,
 ) {
     val uri: Uri
         get() = uriString.toUri()

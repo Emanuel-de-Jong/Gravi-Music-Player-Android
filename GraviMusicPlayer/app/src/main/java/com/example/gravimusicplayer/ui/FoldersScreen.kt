@@ -1,7 +1,5 @@
 package com.example.gravimusicplayer.ui
 
-import android.graphics.BitmapFactory
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -37,13 +36,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
+import coil.compose.AsyncImage
 import com.example.gravimusicplayer.BrowserEntry
 import com.example.gravimusicplayer.BrowserSortMode
 import com.example.gravimusicplayer.LibraryRepository
@@ -73,6 +70,8 @@ fun FoldersScreen(
     onExportFolder: () -> Unit,
     onPlayFile: (BrowserEntry) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -154,6 +153,7 @@ fun FoldersScreen(
             Text("No folders or supported audio files found here. Supported extensions: ${LibraryRepository.audioExtensions.joinToString()}.")
         }
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -243,28 +243,14 @@ private fun BrowserEntryRow(entry: BrowserEntry, showThumbnails: Boolean, onClic
 
 @Composable
 private fun BrowserThumbnail(artworkUriString: String?) {
-    val context = LocalContext.current
-    val artworkBitmap = remember(artworkUriString) {
-        artworkUriString?.let { uriString ->
-            runCatching {
-                context.contentResolver.openInputStream(uriString.toUri())?.use { inputStream ->
-                    BitmapFactory.decodeStream(inputStream)
-                }
-            }.getOrNull()
-        }
-    }
-
     Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
-        if (artworkBitmap != null) {
-            Image(
-                bitmap = artworkBitmap.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Icon(Icons.Filled.MusicNote, contentDescription = null)
-        }
+        Icon(Icons.Filled.MusicNote, contentDescription = null)
+        AsyncImage(
+            model = artworkUriString,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

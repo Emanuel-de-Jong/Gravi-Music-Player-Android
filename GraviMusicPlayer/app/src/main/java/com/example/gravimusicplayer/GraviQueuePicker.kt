@@ -43,23 +43,8 @@ class GraviQueuePicker(
         return selectedItems
     }
 
-    fun buildTrueShuffleQueue(items: List<AudioItem>, queueEntries: Int): List<AudioItem> {
-        val distinctItems = items.distinctBy { it.uriString }
-        if (distinctItems.isEmpty()) return emptyList()
-
-        val selectedItems = mutableListOf<AudioItem>()
-        var remainingItems = distinctItems.shuffled(random)
-        val safeQueueEntries = queueEntries.coerceAtLeast(1)
-
-        while (selectedItems.size < safeQueueEntries) {
-            if (remainingItems.isEmpty()) {
-                remainingItems = distinctItems.shuffled(random)
-            }
-            selectedItems.add(remainingItems.first())
-            remainingItems = remainingItems.drop(1)
-        }
-
-        return selectedItems
+    fun shuffleQueue(items: List<AudioItem>): List<AudioItem> {
+        return items.distinctBy { it.uriString }.shuffled(random)
     }
 
     private fun buildCategoryEntries(

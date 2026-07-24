@@ -35,7 +35,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import com.example.gravimusicplayer.Mp3LyricsReader
 
 class PlaybackService : Service() {
     private val binder = PlaybackBinder()

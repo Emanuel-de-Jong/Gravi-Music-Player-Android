@@ -1,7 +1,5 @@
 package com.example.gravimusicplayer.ui
 
-import android.graphics.BitmapFactory
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.MusicNote
@@ -35,32 +35,34 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
+import coil.compose.AsyncImage
 import com.example.gravimusicplayer.AudioItem
 import com.example.gravimusicplayer.LoopMode
 import com.example.gravimusicplayer.PlaybackSnapshot
 import com.example.gravimusicplayer.formatTime
-import com.example.gravimusicplayer.queueDisplayTitle
 import com.example.gravimusicplayer.queueContext
+import com.example.gravimusicplayer.queueDisplayTitle
 import com.example.gravimusicplayer.ui.theme.GraviMusicPlayerTheme
 
 @Composable
 fun MiniPlayer(
     snapshot: PlaybackSnapshot,
+    showArtwork: Boolean,
     onExpand: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
@@ -79,7 +81,10 @@ fun MiniPlayer(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.MusicNote, contentDescription = null)
+            ArtworkImage(
+                artworkUriString = item.artworkUriString.takeIf { showArtwork },
+                modifier = Modifier.size(40.dp),
+            )
             Column(modifier = Modifier.weight(1f)) {
                 Text(item.displayTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
@@ -113,6 +118,7 @@ fun PlayScreen(
     onSeek: (Int) -> Unit,
     onPlayQueueIndex: (Int) -> Unit,
     onShuffleQueue: () -> Unit,
+    showThumbnails: Boolean,
     onLoopModeChanged: (LoopMode) -> Unit,
 ) {
     val item = snapshot.currentItem
@@ -205,6 +211,7 @@ fun PlayScreen(
         NowPlayingTabs(
             snapshot = snapshot,
             onPlayQueueIndex = onPlayQueueIndex,
+            showThumbnails = showThumbnails,
             modifier = Modifier.weight(1f),
         )
     }
@@ -221,6 +228,7 @@ private enum class NowPlayingTab(
 private fun NowPlayingTabs(
     snapshot: PlaybackSnapshot,
     onPlayQueueIndex: (Int) -> Unit,
+    showThumbnails: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by remember { mutableStateOf(NowPlayingTab.QUEUE) }
@@ -247,6 +255,7 @@ private fun NowPlayingTabs(
             NowPlayingTab.QUEUE -> QueueList(
                 snapshot = snapshot,
                 onPlayQueueIndex = onPlayQueueIndex,
+                showThumbnails = showThumbnails,
                 modifier = Modifier.weight(1f),
             )
 
@@ -260,33 +269,27 @@ private fun NowPlayingTabs(
 
 @Composable
 private fun ArtworkCard(artworkUriString: String?) {
-    val context = LocalContext.current
-    val artworkBitmap = remember(artworkUriString) {
-        artworkUriString?.let { uriString ->
-            runCatching {
-                context.contentResolver.openInputStream(uriString.toUri())?.use { inputStream ->
-                    BitmapFactory.decodeStream(inputStream)
-                }
-            }.getOrNull()
-        }
-    }
-
     Card(
         modifier = Modifier.size(180.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (artworkBitmap != null) {
-                Image(
-                    bitmap = artworkBitmap.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                Text("♪", style = MaterialTheme.typography.displayLarge)
-            }
-        }
+        ArtworkImage(
+            artworkUriString = artworkUriString,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun ArtworkImage(artworkUriString: String?, modifier: Modifier = Modifier) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Icon(Icons.Filled.MusicNote, contentDescription = null)
+        AsyncImage(
+            model = artworkUriString,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -352,8 +355,43 @@ private fun LoopModeSelector(
 private fun QueueList(
     snapshot: PlaybackSnapshot,
     onPlayQueueIndex: (Int) -> Unit,
+    showThumbnails: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    var queueSearchQuery by rememberSaveable { mutableStateOf("") }
+    var lastQueueIndex by rememberSaveable { mutableIntStateOf(snapshot.currentIndex) }
+    val listState = rememberLazyListState()
+    val shouldShowThumbnails = showThumbnails && snapshot.queue.size <= MAX_THUMBNAIL_QUEUE_SIZE
+    val displayedQueueItems = snapshot.queue.withIndex()
+        .filter { queueItem ->
+            queueSearchQuery.isBlank() || queueItem.value.matchesQueueSearch(
+                queueSearchQuery
+            )
+        }
+
+    LaunchedEffect(queueSearchQuery) {
+        listState.scrollToItem(0)
+    }
+
+    LaunchedEffect(snapshot.currentIndex, snapshot.queue, queueSearchQuery) {
+        val currentIndex = snapshot.currentIndex
+        val hasQueueIndexChanged = currentIndex != lastQueueIndex
+        lastQueueIndex = currentIndex
+        if (!hasQueueIndexChanged) return@LaunchedEffect
+        if (currentIndex < 0 || queueSearchQuery.isNotBlank() || listState.isScrollInProgress) {
+            return@LaunchedEffect
+        }
+
+        val rowIndex = displayedQueueItems.indexOfFirst { it.index == currentIndex }
+        if (rowIndex < 0) return@LaunchedEffect
+
+        val currentItemIsVisible =
+            listState.layoutInfo.visibleItemsInfo.any { it.index == rowIndex }
+        if (!currentItemIsVisible) {
+            listState.animateScrollToItem(rowIndex)
+        }
+    }
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -361,12 +399,21 @@ private fun QueueList(
         if (snapshot.queue.isEmpty()) {
             Text("Queue is empty. Start playback from a folder, file, or genre to populate it.")
         }
+        SearchTextField(
+            value = queueSearchQuery,
+            onValueChange = { queueSearchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+        )
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(snapshot.queue.size) { index ->
-                val queueItem = snapshot.queue[index]
+            items(
+                displayedQueueItems,
+                key = { "${it.index}-${it.value.uriString}" }) { indexedQueueItem ->
+                val index = indexedQueueItem.index
+                val queueItem = indexedQueueItem.value
                 val isCurrentItem = index == snapshot.currentIndex
                 Card(
                     modifier = Modifier
@@ -380,22 +427,42 @@ private fun QueueList(
                         }
                     ),
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Text(
-                            text = if (isCurrentItem) "▶ ${queueItem.displayTitle}" else queueItem.displayTitle,
-                            fontWeight = if (isCurrentItem) FontWeight.Bold else FontWeight.Normal,
-                        )
-                        Text(
-                            text = queueItem.queueContext(),
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (shouldShowThumbnails) {
+                            ArtworkImage(
+                                artworkUriString = queueItem.artworkUriString,
+                                modifier = Modifier.size(36.dp),
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (isCurrentItem) "▶ ${queueItem.displayTitle}" else queueItem.displayTitle,
+                                fontWeight = if (isCurrentItem) FontWeight.Bold else FontWeight.Normal,
+                            )
+                            Text(
+                                text = queueItem.queueContext(),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private fun AudioItem.matchesQueueSearch(query: String): Boolean {
+    val normalizedQuery = query.trim()
+    if (normalizedQuery.isBlank()) return true
+
+    return listOf(displayTitle, metadataTitle.orEmpty(), folderPath)
+        .any { it.contains(normalizedQuery, ignoreCase = true) }
 }
 
 @Composable
@@ -438,7 +505,10 @@ fun PlayScreenPreview() {
             onSeek = {},
             onPlayQueueIndex = {},
             onShuffleQueue = {},
+            showThumbnails = false,
             onLoopModeChanged = {},
         )
     }
 }
+
+private const val MAX_THUMBNAIL_QUEUE_SIZE = 500

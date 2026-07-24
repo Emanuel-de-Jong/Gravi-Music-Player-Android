@@ -11,7 +11,6 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.core.net.toUri
-import com.example.gravimusicplayer.Mp3LyricsReader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -169,6 +168,7 @@ class LibraryRepository(private val context: Context) {
                     null,
                     null,
                     null,
+                    null,
                 )
                 metadataCacheChanged = true
             }
@@ -265,6 +265,7 @@ class LibraryRepository(private val context: Context) {
             metadataCacheFile?.releaseDate,
             metadataCacheFile?.lyrics,
             lastModifiedMs,
+            metadataCacheFile?.metadataTitle,
         )
     }
 
@@ -543,6 +544,7 @@ class LibraryRepository(private val context: Context) {
                     file.optString("artist").takeIf { it.isNotBlank() },
                     file.optString("releaseDate").takeIf { it.isNotBlank() },
                     file.optString("lyrics").takeIf { it.isNotBlank() },
+                    file.optString("metadataTitle").takeIf { it.isNotBlank() },
                 ).takeIf { it.uriString.isNotBlank() }
             }
         }.getOrDefault(emptyList()).associateBy { it.uriString }.toMutableMap()
@@ -564,6 +566,7 @@ class LibraryRepository(private val context: Context) {
                     .put("artist", file.artist)
                     .put("releaseDate", file.releaseDate)
                     .put("lyrics", file.lyrics)
+                    .put("metadataTitle", file.metadataTitle)
             )
         }
         val json = JSONObject()
@@ -599,6 +602,8 @@ class LibraryRepository(private val context: Context) {
                         ?.takeIf { it.isNotBlank() },
                     readReleaseDate(retriever),
                     Mp3LyricsReader.readLyrics(context, uri),
+                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                        ?.takeIf { it.isNotBlank() },
                 )
             }.getOrNull()
         } finally {
@@ -767,6 +772,7 @@ private data class AudioMetadataCacheFile(
     val artist: String?,
     val releaseDate: String?,
     val lyrics: String?,
+    val metadataTitle: String?,
 ) {
     fun matches(audioFile: AudioFileSnapshot): Boolean {
         return uriString == audioFile.uriString &&

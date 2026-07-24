@@ -35,11 +35,11 @@ import com.example.gravimusicplayer.DefaultStartPlayOrder
 import com.example.gravimusicplayer.GraviQueuePicker
 import com.example.gravimusicplayer.LibraryRepository
 import com.example.gravimusicplayer.PendingPlaybackRequest
-import com.example.gravimusicplayer.QueueOrder
-import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.PlaybackService
 import com.example.gravimusicplayer.PlaybackSnapshot
 import com.example.gravimusicplayer.PlayerPreferences
+import com.example.gravimusicplayer.QueueOrder
+import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.TagGroup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -77,6 +77,7 @@ fun GraviMusicPlayerApp() {
     var genreSeparator by rememberSaveable { mutableStateOf(preferences.genreSeparator) }
     var appliedGenreSeparator by rememberSaveable { mutableStateOf(preferences.genreSeparator) }
     var showBrowserThumbnails by rememberSaveable { mutableStateOf(preferences.showBrowserThumbnails) }
+    var queueSearchResults by rememberSaveable { mutableStateOf(preferences.queueSearchResults) }
     var graviPickerSettings by remember { mutableStateOf(preferences.graviPickerSettings) }
     var pendingPlaylistExport by remember { mutableStateOf<List<AudioItem>?>(null) }
     var isFolderActionRunning by remember { mutableStateOf(false) }
@@ -239,6 +240,7 @@ fun GraviMusicPlayerApp() {
                     onSeek = { playbackService?.seekTo(it) },
                     onPlayQueueIndex = { playbackService?.playQueueIndex(it) },
                     onShuffleQueue = { playbackService?.shuffleQueue() },
+                    showThumbnails = showBrowserThumbnails,
                     onLoopModeChanged = {
                         savedLoopMode = it
                         preferences.loopMode = it
@@ -319,17 +321,15 @@ fun GraviMusicPlayerApp() {
                                 onShuffleFolder = {
                                     val rootUri = rootUriString ?: return@FoldersScreen
                                     val selectedFolderStack = folderStack
-                                    val selectedGraviPickerSettings = graviPickerSettings
                                     coroutineScope.launch {
                                         isFolderActionRunning = true
                                         try {
                                             val queue = withContext(Dispatchers.IO) {
-                                                graviQueuePicker.buildTrueShuffleQueue(
+                                                graviQueuePicker.shuffleQueue(
                                                     libraryRepository.loadRecursiveAudioItems(
                                                         rootUri,
                                                         selectedFolderStack
-                                                    ),
-                                                    selectedGraviPickerSettings.queueEntries,
+                                                    )
                                                 )
                                             }
                                             pendingPlaybackRequest = requestPlayback(
@@ -408,22 +408,26 @@ fun GraviMusicPlayerApp() {
                                     coroutineScope.launch {
                                         isFolderActionRunning = true
                                         try {
-                                            val queue = if (folderSearchQuery.isBlank()) {
-                                                sortedBrowserEntries.mapNotNull { it.audioItem }
-                                            } else {
-                                                withContext(Dispatchers.IO) {
-                                                    libraryRepository.loadRecursiveAudioItems(
-                                                        selectedRootUri,
-                                                        selectedFolderStack,
-                                                    )
+                                            val queue =
+                                                if (folderSearchQuery.isBlank() || queueSearchResults) {
+                                                    sortedBrowserEntries.mapNotNull { it.audioItem }
+                                                } else {
+                                                    withContext(Dispatchers.IO) {
+                                                        libraryRepository.loadRecursiveAudioItems(
+                                                            selectedRootUri,
+                                                            selectedFolderStack,
+                                                        )
+                                                    }
                                                 }
-                                            }
                                             val startIndex =
                                                 queue.indexOfFirst { it.uriString == selectedItem.uriString }
                                                     .coerceAtLeast(0)
-                                            val queueName = folderQueueName(
-                                                if (folderSearchQuery.isBlank()) folderStack else selectedFolderStack
-                                            )
+                                            val queueName =
+                                                if (folderSearchQuery.isBlank() || queueSearchResults) {
+                                                    folderQueueName(folderStack)
+                                                } else {
+                                                    folderQueueName(selectedFolderStack)
+                                                }
                                             val playbackQueue = if (
                                                 defaultStartPlayOrder == DefaultStartPlayOrder.SHUFFLED
                                             ) {
@@ -465,7 +469,7 @@ fun GraviMusicPlayerApp() {
                                     val playbackQueue = if (
                                         defaultStartPlayOrder == DefaultStartPlayOrder.SHUFFLED
                                     ) {
-                                        tagGroup.items.shuffled()
+                                        graviQueuePicker.shuffleQueue(tagGroup.items)
                                     } else {
                                         tagGroup.items
                                     }
@@ -490,6 +494,7 @@ fun GraviMusicPlayerApp() {
                                 defaultStartPlayOrder = defaultStartPlayOrder,
                                 genreSeparator = genreSeparator,
                                 showBrowserThumbnails = showBrowserThumbnails,
+                                queueSearchResults = queueSearchResults,
                                 graviPickerSettings = graviPickerSettings,
                                 onChooseFolder = { folderPicker.launch(null) },
                                 onDefaultStartPlayOrderChanged = {
@@ -510,6 +515,10 @@ fun GraviMusicPlayerApp() {
                                     showBrowserThumbnails = it
                                     preferences.showBrowserThumbnails = it
                                 },
+                                onQueueSearchResultsChanged = {
+                                    queueSearchResults = it
+                                    preferences.queueSearchResults = it
+                                },
                                 onGraviPickerSettingsChanged = {
                                     graviPickerSettings = it
                                     preferences.graviPickerSettings = it
@@ -521,6 +530,7 @@ fun GraviMusicPlayerApp() {
                                     genreSeparator = preferences.genreSeparator
                                     appliedGenreSeparator = preferences.genreSeparator
                                     showBrowserThumbnails = preferences.showBrowserThumbnails
+                                    queueSearchResults = preferences.queueSearchResults
                                     graviPickerSettings = preferences.graviPickerSettings
                                     playbackService?.setLoopMode(savedLoopMode)
                                     tagGroups = emptyList()
@@ -537,6 +547,7 @@ fun GraviMusicPlayerApp() {
                     }
                     MiniPlayer(
                         snapshot = playbackSnapshot,
+                        showArtwork = showBrowserThumbnails,
                         onExpand = { isPlayerExpanded = true },
                         onPlayPause = { playbackService?.togglePlayPause() },
                         onNext = { playbackService?.playNext() },
@@ -575,7 +586,9 @@ private fun browserSortKey(entry: BrowserEntry, sortMode: BrowserSortMode): Comp
         BrowserSortMode.ARTIST -> item?.artist?.lowercase() ?: item?.displayTitle?.lowercase()
         ?: entry.name.lowercase()
 
-        BrowserSortMode.TITLE -> item?.displayTitle?.lowercase() ?: entry.name.lowercase()
+        BrowserSortMode.TITLE -> item?.metadataTitle?.lowercase() ?: item?.displayTitle?.lowercase()
+        ?: entry.name.lowercase()
+
         BrowserSortMode.DURATION -> item?.durationMs ?: 0L
         BrowserSortMode.RELEASE_DATE -> item?.releaseDate.orEmpty().lowercase()
         BrowserSortMode.ADDITION_DATE -> item?.lastModifiedMs ?: 0L

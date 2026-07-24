@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material3.Button
@@ -39,6 +40,8 @@ fun GenresScreen(
     onToggleSortDirection: () -> Unit,
     onPlayTag: (TagGroup) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -75,6 +78,7 @@ fun GenresScreen(
         }
 
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {

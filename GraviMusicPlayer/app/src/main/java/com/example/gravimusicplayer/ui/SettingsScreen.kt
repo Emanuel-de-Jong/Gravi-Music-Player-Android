@@ -1,7 +1,5 @@
 package com.example.gravimusicplayer.ui
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,8 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
@@ -45,12 +44,14 @@ fun SettingsScreen(
     defaultStartPlayOrder: DefaultStartPlayOrder,
     genreSeparator: String,
     showBrowserThumbnails: Boolean,
+    queueSearchResults: Boolean,
     graviPickerSettings: GraviPickerSettings,
     onChooseFolder: () -> Unit,
     onDefaultStartPlayOrderChanged: (DefaultStartPlayOrder) -> Unit,
     onGenreSeparatorChanged: (String) -> Unit,
     onApplyGenreSeparator: (String) -> Unit,
     onShowBrowserThumbnailsChanged: (Boolean) -> Unit,
+    onQueueSearchResultsChanged: (Boolean) -> Unit,
     onGraviPickerSettingsChanged: (GraviPickerSettings) -> Unit,
     onResetSettings: () -> Unit,
     onClearCaches: () -> Unit,
@@ -80,6 +81,12 @@ fun SettingsScreen(
         DefaultStartPlayOrderSetting(
             selectedOrder = defaultStartPlayOrder,
             onOrderSelected = onDefaultStartPlayOrderChanged,
+        )
+        SwitchSettingRow(
+            label = "Queue search results",
+            checked = queueSearchResults,
+            infoText = "When enabled, opening a song in folder search queues all song results. When disabled, it queues songs in the selected song's folder and subfolders.",
+            onCheckedChanged = onQueueSearchResultsChanged,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -334,12 +341,14 @@ fun SettingsScreenPreview() {
             defaultStartPlayOrder = DefaultStartPlayOrder.ORDERED,
             genreSeparator = ";",
             showBrowserThumbnails = false,
+            queueSearchResults = true,
             graviPickerSettings = GraviPickerSettings(),
             onChooseFolder = {},
             onDefaultStartPlayOrderChanged = {},
             onGenreSeparatorChanged = {},
             onApplyGenreSeparator = {},
             onShowBrowserThumbnailsChanged = {},
+            onQueueSearchResultsChanged = {},
             onGraviPickerSettingsChanged = {},
             onResetSettings = {},
             onClearCaches = {},
