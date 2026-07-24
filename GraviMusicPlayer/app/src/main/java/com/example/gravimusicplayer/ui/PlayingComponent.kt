@@ -33,9 +33,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -317,7 +317,7 @@ private fun NowPlayingTabs(
     var selectedTab by remember { mutableStateOf(NowPlayingTab.QUEUE) }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        TabRow(selectedTabIndex = NowPlayingTab.entries.indexOf(selectedTab)) {
+        PrimaryTabRow(selectedTabIndex = NowPlayingTab.entries.indexOf(selectedTab)) {
             NowPlayingTab.entries.forEach { tab ->
                 Tab(
                     selected = selectedTab == tab,
@@ -442,25 +442,26 @@ private fun QueueList(
     modifier: Modifier = Modifier,
 ) {
     var queueSearchQuery by rememberSaveable { mutableStateOf("") }
+    var appliedQueueSearchQuery by rememberSaveable { mutableStateOf("") }
     var lastQueueIndex by rememberSaveable { mutableIntStateOf(snapshot.currentIndex) }
     val listState = rememberLazyListState()
     val displayedQueueItems = snapshot.queue.withIndex()
         .filter { queueItem ->
-            queueSearchQuery.isBlank() || queueItem.value.matchesQueueSearch(
-                queueSearchQuery
+            appliedQueueSearchQuery.isBlank() || queueItem.value.matchesQueueSearch(
+                appliedQueueSearchQuery
             )
         }
 
-    LaunchedEffect(queueSearchQuery) {
+    LaunchedEffect(appliedQueueSearchQuery) {
         listState.scrollToItem(0)
     }
 
-    LaunchedEffect(snapshot.currentIndex, snapshot.queue, queueSearchQuery) {
+    LaunchedEffect(snapshot.currentIndex, snapshot.queue, appliedQueueSearchQuery) {
         val currentIndex = snapshot.currentIndex
         val hasQueueIndexChanged = currentIndex != lastQueueIndex
         lastQueueIndex = currentIndex
         if (!hasQueueIndexChanged) return@LaunchedEffect
-        if (currentIndex < 0 || queueSearchQuery.isNotBlank() || listState.isScrollInProgress) {
+        if (currentIndex < 0 || appliedQueueSearchQuery.isNotBlank() || listState.isScrollInProgress) {
             return@LaunchedEffect
         }
 
@@ -483,7 +484,11 @@ private fun QueueList(
         }
         SearchTextField(
             value = queueSearchQuery,
-            onValueChange = { queueSearchQuery = it },
+            onValueChange = { query ->
+                queueSearchQuery = query
+                if (query.isBlank()) appliedQueueSearchQuery = ""
+            },
+            onSearch = { appliedQueueSearchQuery = queueSearchQuery },
             modifier = Modifier.fillMaxWidth(),
         )
         LazyColumn(

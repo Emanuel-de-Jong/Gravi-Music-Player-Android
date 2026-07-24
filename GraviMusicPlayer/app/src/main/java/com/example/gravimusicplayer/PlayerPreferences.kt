@@ -43,7 +43,7 @@ class PlayerPreferences(context: Context) {
         }
 
     var skipSilenceEnabled: Boolean
-        get() = preferences.getBoolean(KEY_SKIP_SILENCE_ENABLED, true)
+        get() = preferences.getBoolean(KEY_SKIP_SILENCE_ENABLED, false)
         set(value) {
             preferences.edit { putBoolean(KEY_SKIP_SILENCE_ENABLED, value) }
         }

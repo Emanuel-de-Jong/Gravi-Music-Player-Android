@@ -19,12 +19,53 @@ class SilenceAnalyzer(private val context: Context) {
 
     fun analyze(uri: Uri, shouldCancel: () -> Boolean): SilenceBoundaries {
         return performanceProfiler.measure("SilenceAnalyzer.analyze") {
-            runCatching { decodeLevels(uri, shouldCancel)?.let(::boundariesFromLevels) }
-                .getOrNull() ?: SilenceBoundaries()
+            runCatching { analyzeBoundaries(uri, shouldCancel) }.getOrDefault(SilenceBoundaries())
         }
     }
 
-    private fun decodeLevels(uri: Uri, shouldCancel: () -> Boolean): List<Double>? {
+    private fun analyzeBoundaries(uri: Uri, shouldCancel: () -> Boolean): SilenceBoundaries {
+        val leadingScan = decodeLevels(uri, 0L, true, shouldCancel) ?: return SilenceBoundaries()
+        if (shouldCancel()) return SilenceBoundaries()
+
+        val leadingWindows = silentWindowCount(leadingScan.levels)
+        val trailingWindows = trailingSilentWindowCount(
+            uri,
+            leadingScan.durationUs,
+            shouldCancel,
+        ) ?: return SilenceBoundaries()
+        if (shouldCancel()) return SilenceBoundaries()
+
+        return SilenceBoundaries(
+            trimStartPositionMs(leadingWindows),
+            trimEndPositionMs(leadingScan.durationUs, trailingWindows),
+        )
+    }
+
+    private fun trailingSilentWindowCount(
+        uri: Uri,
+        durationUs: Long,
+        shouldCancel: () -> Boolean,
+    ): Int? {
+        var searchDurationUs = INITIAL_TRAILING_SEARCH_US
+        while (true) {
+            val requestedStartUs = (durationUs - searchDurationUs).coerceAtLeast(0L)
+            val scan = decodeLevels(uri, requestedStartUs, false, shouldCancel) ?: return null
+            if (shouldCancel()) return null
+
+            val trailingWindows = silentWindowCount(scan.levels.asReversed())
+            if (trailingWindows < scan.levels.size || requestedStartUs == 0L) {
+                return trailingWindows
+            }
+            searchDurationUs = (searchDurationUs * 2).coerceAtMost(durationUs)
+        }
+    }
+
+    private fun decodeLevels(
+        uri: Uri,
+        startUs: Long,
+        stopAfterLeadingAudio: Boolean,
+        shouldCancel: () -> Boolean,
+    ): LevelScan? {
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
         return try {
@@ -32,11 +73,15 @@ class SilenceAnalyzer(private val context: Context) {
             val trackIndex = findAudioTrackIndex(extractor) ?: return null
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mimeType = inputFormat.getString(MediaFormat.KEY_MIME) ?: return null
+            val durationUs = inputFormat.getLongOrDefault(MediaFormat.KEY_DURATION, 0L)
+            if (durationUs <= 0L) return null
+
             extractor.selectTrack(trackIndex)
+            if (startUs > 0L) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             decoder = MediaCodec.createDecoderByType(mimeType)
             decoder.configure(inputFormat, null, null, 0)
             decoder.start()
-            decodeLevels(extractor, decoder, shouldCancel)
+            decodeLevels(extractor, decoder, durationUs, stopAfterLeadingAudio, shouldCancel)
         } finally {
             decoder?.runCatching { stop() }
             decoder?.release()
@@ -44,20 +89,13 @@ class SilenceAnalyzer(private val context: Context) {
         }
     }
 
-    private fun findAudioTrackIndex(extractor: MediaExtractor): Int? {
-        for (index in 0 until extractor.trackCount) {
-            val format = extractor.getTrackFormat(index)
-            val mimeType = format.getString(MediaFormat.KEY_MIME)
-            if (mimeType?.startsWith("audio/") == true) return index
-        }
-        return null
-    }
-
     private fun decodeLevels(
         extractor: MediaExtractor,
         decoder: MediaCodec,
+        durationUs: Long,
+        stopAfterLeadingAudio: Boolean,
         shouldCancel: () -> Boolean,
-    ): List<Double>? {
+    ): LevelScan? {
         val levels = mutableListOf<Double>()
         val bufferInfo = MediaCodec.BufferInfo()
         var inputEnded = false
@@ -66,8 +104,7 @@ class SilenceAnalyzer(private val context: Context) {
         var sampleRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         var channelCount = outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
         var encoding = outputFormat.getIntegerOrDefault(MediaFormat.KEY_PCM_ENCODING, 2)
-        var windowSquareSum = 0.0
-        var windowSampleCount = 0
+        var windowState = WindowState()
         var samplesPerWindow = samplesPerWindow(sampleRate)
 
         while (!outputEnded && !shouldCancel()) {
@@ -82,7 +119,7 @@ class SilenceAnalyzer(private val context: Context) {
                             0,
                             0,
                             0,
-                            MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            MediaCodec.BUFFER_FLAG_END_OF_STREAM,
                         )
                         inputEnded = true
                     } else {
@@ -111,14 +148,14 @@ class SilenceAnalyzer(private val context: Context) {
                             channelCount,
                             encoding,
                             samplesPerWindow,
-                            windowSquareSum,
-                            windowSampleCount,
+                            windowState,
                             levels,
+                            stopAfterLeadingAudio,
                             shouldCancel,
                         ) ?: return null
-                        windowSquareSum = result.squareSum
-                        windowSampleCount = result.sampleCount
-                        outputEnded = bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                        windowState = result
+                        outputEnded = windowState.foundLeadingAudio ||
+                                bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     } finally {
                         decoder.releaseOutputBuffer(outputIndex, false)
                     }
@@ -127,10 +164,10 @@ class SilenceAnalyzer(private val context: Context) {
         }
 
         if (shouldCancel()) return null
-        if (windowSampleCount > 0) {
-            levels += sqrt(windowSquareSum / windowSampleCount)
+        if (windowState.sampleCount > 0) {
+            levels += sqrt(windowState.squareSum / windowState.sampleCount)
         }
-        return levels
+        return LevelScan(levels, durationUs)
     }
 
     private fun readPcmLevels(
@@ -139,80 +176,70 @@ class SilenceAnalyzer(private val context: Context) {
         channelCount: Int,
         encoding: Int,
         samplesPerWindow: Int,
-        initialSquareSum: Double,
-        initialSampleCount: Int,
+        initialWindowState: WindowState,
         levels: MutableList<Double>,
+        stopAfterLeadingAudio: Boolean,
         shouldCancel: () -> Boolean,
     ): WindowState? {
-        var squareSum = initialSquareSum
-        var sampleCount = initialSampleCount
+        var squareSum = initialWindowState.squareSum
+        var sampleCount = initialWindowState.sampleCount
         var frameCount = 0
+        var foundLeadingAudio = false
         val buffer = outputBuffer.order(ByteOrder.LITTLE_ENDIAN)
         buffer.position(bufferInfo.offset)
         buffer.limit(bufferInfo.offset + bufferInfo.size)
         val safeChannelCount = channelCount.coerceAtLeast(1)
 
-        when (encoding) {
-            2 -> {
-                while (buffer.remaining() >= safeChannelCount * 2) {
-                    if (frameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
-                    var frameValue = 0.0
-                    repeat(safeChannelCount) {
-                        frameValue += buffer.short / 32768.0
-                    }
-                    val value = frameValue / safeChannelCount
-                    squareSum += value * value
-                    sampleCount++
-                    if (sampleCount >= samplesPerWindow) {
-                        levels += sqrt(squareSum / sampleCount)
-                        squareSum = 0.0
-                        sampleCount = 0
-                    }
-                }
+        while (buffer.remaining() >= safeChannelCount * bytesPerSample(encoding) && !foundLeadingAudio) {
+            if (frameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
+            val frameValue = readFrameValue(buffer, safeChannelCount, encoding) ?: return null
+            squareSum += frameValue * frameValue
+            sampleCount++
+            if (sampleCount >= samplesPerWindow) {
+                val level = sqrt(squareSum / sampleCount)
+                levels += level
+                foundLeadingAudio = stopAfterLeadingAudio && level > SILENCE_THRESHOLD
+                squareSum = 0.0
+                sampleCount = 0
             }
+        }
 
-            4 -> {
-                while (buffer.remaining() >= safeChannelCount * 4) {
-                    if (frameCount++ % CANCEL_CHECK_FRAME_INTERVAL == 0 && shouldCancel()) return null
-                    var frameValue = 0.0
-                    repeat(safeChannelCount) {
-                        frameValue += buffer.float.toDouble().coerceIn(-1.0, 1.0)
-                    }
-                    val value = frameValue / safeChannelCount
-                    squareSum += value * value
-                    sampleCount++
-                    if (sampleCount >= samplesPerWindow) {
-                        levels += sqrt(squareSum / sampleCount)
-                        squareSum = 0.0
-                        sampleCount = 0
-                    }
-                }
+        return WindowState(squareSum, sampleCount, foundLeadingAudio)
+    }
+
+    private fun readFrameValue(buffer: ByteBuffer, channelCount: Int, encoding: Int): Double? {
+        var frameValue = 0.0
+        when (encoding) {
+            PCM_16BIT -> repeat(channelCount) { frameValue += buffer.short / 32768.0 }
+            PCM_FLOAT -> repeat(channelCount) {
+                frameValue += buffer.float.toDouble().coerceIn(-1.0, 1.0)
             }
 
             else -> return null
         }
-
-        return WindowState(squareSum, sampleCount)
+        return frameValue / channelCount
     }
 
-    private fun boundariesFromLevels(levels: List<Double>): SilenceBoundaries {
-        if (levels.isEmpty()) return SilenceBoundaries()
-
-        val leadingWindows = silentWindowCount(levels)
-        val trailingWindows = silentWindowCount(levels.asReversed())
-        val retainedWindows = RETAINED_SILENCE_MS / WINDOW_DURATION_MS
-        val startPositionMs = if (leadingWindows > retainedWindows) {
-            (leadingWindows - retainedWindows) * WINDOW_DURATION_MS
-        } else {
-            0
+    private fun bytesPerSample(encoding: Int): Int {
+        return when (encoding) {
+            PCM_16BIT -> 2
+            PCM_FLOAT -> 4
+            else -> Int.MAX_VALUE
         }
-        val endPositionMs = if (trailingWindows > retainedWindows) {
-            (levels.size - trailingWindows + retainedWindows) * WINDOW_DURATION_MS
-        } else {
-            null
-        }
-        return SilenceBoundaries(startPositionMs, endPositionMs)
     }
+
+    private fun trimStartPositionMs(leadingWindows: Int): Int {
+        return ((leadingWindows - retainedWindowCount()).coerceAtLeast(0) * WINDOW_DURATION_MS)
+    }
+
+    private fun trimEndPositionMs(durationUs: Long, trailingWindows: Int): Int? {
+        if (trailingWindows <= retainedWindowCount()) return null
+        val durationMs = (durationUs / 1_000).toInt()
+        return (durationMs - (trailingWindows - retainedWindowCount()) * WINDOW_DURATION_MS)
+            .coerceAtLeast(0)
+    }
+
+    private fun retainedWindowCount(): Int = RETAINED_SILENCE_MS / WINDOW_DURATION_MS
 
     private fun silentWindowCount(levels: List<Double>): Int {
         var count = 0
@@ -227,20 +254,38 @@ class SilenceAnalyzer(private val context: Context) {
         return (sampleRate * WINDOW_DURATION_MS / 1000).coerceAtLeast(1)
     }
 
+    private fun findAudioTrackIndex(extractor: MediaExtractor): Int? {
+        for (index in 0 until extractor.trackCount) {
+            val format = extractor.getTrackFormat(index)
+            if (format.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) return index
+        }
+        return null
+    }
+
     private fun MediaFormat.getIntegerOrDefault(key: String, defaultValue: Int): Int {
         return if (containsKey(key)) getInteger(key) else defaultValue
     }
 
+    private fun MediaFormat.getLongOrDefault(key: String, defaultValue: Long): Long {
+        return if (containsKey(key)) getLong(key) else defaultValue
+    }
+
+    private data class LevelScan(val levels: List<Double>, val durationUs: Long)
+
     private data class WindowState(
-        val squareSum: Double,
-        val sampleCount: Int,
+        val squareSum: Double = 0.0,
+        val sampleCount: Int = 0,
+        val foundLeadingAudio: Boolean = false,
     )
 
     companion object {
         private const val TIMEOUT_US = 10_000L
+        private const val PCM_16BIT = 2
+        private const val PCM_FLOAT = 4
         private const val WINDOW_DURATION_MS = 100
         private const val RETAINED_SILENCE_MS = 1500
         private const val SILENCE_THRESHOLD = 0.003
+        private const val INITIAL_TRAILING_SEARCH_US = 30_000_000L
         private const val CANCEL_CHECK_FRAME_INTERVAL = 4096
     }
 }

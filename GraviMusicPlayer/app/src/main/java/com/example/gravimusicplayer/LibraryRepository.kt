@@ -20,6 +20,7 @@ class LibraryRepository(private val context: Context) {
     private val performanceProfiler = PerformanceProfiler.get(context)
     private val audioFilesCache = mutableMapOf<String, List<AudioFileSnapshot>>()
     private val recursiveAudioItemsCache = mutableMapOf<String, List<AudioItem>>()
+    private val genreCache = mutableMapOf<String, List<GenreCacheFile>>()
     private val audioMetadataCache =
         mutableMapOf<String, MutableMap<String, AudioMetadataCacheFile>>()
 
@@ -137,7 +138,9 @@ class LibraryRepository(private val context: Context) {
                     )
                 }
             }
-            saveGenreCache(rootUriString, genreSeparator, updatedFiles)
+            if (hasGenreCacheChanged(updatedFiles, cachedFiles)) {
+                saveGenreCache(rootUriString, genreSeparator, updatedFiles)
+            }
             buildAudioItems(
                 rootUriString,
                 audioFiles,
@@ -213,7 +216,9 @@ class LibraryRepository(private val context: Context) {
                     )
                 }
             }
-            saveGenreCache(rootUriString, genreSeparator, updatedGenreFiles)
+            if (hasGenreCacheChanged(updatedGenreFiles, genreFilesByUri)) {
+                saveGenreCache(rootUriString, genreSeparator, updatedGenreFiles)
+            }
             recursiveAudioItemsCache.clear()
         }
     }
@@ -221,6 +226,7 @@ class LibraryRepository(private val context: Context) {
     fun clearSessionCache() {
         audioFilesCache.clear()
         recursiveAudioItemsCache.clear()
+        genreCache.clear()
         audioMetadataCache.clear()
     }
 
@@ -488,6 +494,8 @@ class LibraryRepository(private val context: Context) {
         rootUriString: String,
         genreSeparator: String
     ): List<GenreCacheFile> {
+        val cacheKey = genreCacheKey(rootUriString, genreSeparator)
+        genreCache[cacheKey]?.let { return it }
         val cacheFile = genreCacheFile(rootUriString)
         if (!cacheFile.exists()) return emptyList()
 
@@ -510,7 +518,7 @@ class LibraryRepository(private val context: Context) {
                     file.optString("artworkUriString").takeIf { it.isNotBlank() },
                 ).takeIf { it.uriString.isNotBlank() }
             }
-        }.getOrDefault(emptyList())
+        }.getOrDefault(emptyList()).also { genreCache[cacheKey] = it }
     }
 
     private fun saveGenreCache(
@@ -537,6 +545,19 @@ class LibraryRepository(private val context: Context) {
             .put("scannedAtMs", System.currentTimeMillis())
             .put("files", jsonFiles)
         genreCacheFile(rootUriString).writeText(json.toString())
+        genreCache[genreCacheKey(rootUriString, genreSeparator)] = files
+    }
+
+    private fun genreCacheKey(rootUriString: String, genreSeparator: String): String {
+        return "$rootUriString;$genreSeparator"
+    }
+
+    private fun hasGenreCacheChanged(
+        updatedFiles: List<GenreCacheFile>,
+        cachedFilesByUri: Map<String, GenreCacheFile>,
+    ): Boolean {
+        return updatedFiles.size != cachedFilesByUri.size ||
+                updatedFiles.any { cachedFilesByUri[it.uriString] != it }
     }
 
     private fun genreCacheFile(rootUriString: String): File {

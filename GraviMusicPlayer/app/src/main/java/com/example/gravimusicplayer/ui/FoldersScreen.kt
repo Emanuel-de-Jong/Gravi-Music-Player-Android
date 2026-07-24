@@ -61,6 +61,7 @@ fun FoldersScreen(
     isFolderActionRunning: Boolean,
     onChooseFolder: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
+    onSearchSubmitted: () -> Unit,
     onSortModeChanged: (BrowserSortMode) -> Unit,
     onToggleSortDirection: () -> Unit,
     onOpenFolder: (BrowserEntry) -> Unit,
@@ -106,6 +107,7 @@ fun FoldersScreen(
             SearchTextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChanged,
+                onSearch = onSearchSubmitted,
                 modifier = Modifier.weight(1f),
             )
             BrowserSortModeSelector(sortMode, onSortModeChanged)
@@ -275,6 +277,7 @@ fun FoldersScreenPreview() {
             isFolderActionRunning = false,
             onChooseFolder = {},
             onSearchQueryChanged = {},
+            onSearchSubmitted = {},
             onSortModeChanged = {},
             onToggleSortDirection = {},
             onOpenFolder = {},

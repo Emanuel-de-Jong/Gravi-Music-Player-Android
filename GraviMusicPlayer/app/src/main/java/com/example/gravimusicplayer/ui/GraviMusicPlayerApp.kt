@@ -67,7 +67,9 @@ fun GraviMusicPlayerApp() {
     var rootUriString by rememberSaveable { mutableStateOf(preferences.rootUriString) }
     var folderStack by rememberSaveable { mutableStateOf(emptyList<String>()) }
     var folderSearchQuery by rememberSaveable { mutableStateOf("") }
+    var appliedFolderSearchQuery by rememberSaveable { mutableStateOf("") }
     var genreSearchQuery by rememberSaveable { mutableStateOf("") }
+    var appliedGenreSearchQuery by rememberSaveable { mutableStateOf("") }
     var browserSortMode by rememberSaveable { mutableStateOf(BrowserSortMode.FILENAME) }
     var browserSortAscending by rememberSaveable { mutableStateOf(true) }
     var genreSortAscending by rememberSaveable { mutableStateOf(true) }
@@ -109,7 +111,9 @@ fun GraviMusicPlayerApp() {
                 preferences.rootUriString = rootUriString
                 folderStack = emptyList()
                 folderSearchQuery = ""
+                appliedFolderSearchQuery = ""
                 genreSearchQuery = ""
+                appliedGenreSearchQuery = ""
                 browserEntries = emptyList()
                 tagGroups = emptyList()
                 libraryRepository.clearSessionCache()
@@ -215,17 +219,17 @@ fun GraviMusicPlayerApp() {
     LaunchedEffect(
         rootUriString,
         folderStack,
-        folderSearchQuery,
+        appliedFolderSearchQuery,
         libraryCacheVersion,
         isGeneratingCache
     ) {
         val rootUri = rootUriString
         browserEntries =
             if (rootUri == null || isGeneratingCache) emptyList() else withContext(Dispatchers.IO) {
-                if (folderSearchQuery.isBlank()) {
+                if (appliedFolderSearchQuery.isBlank()) {
                     libraryRepository.loadBrowserEntries(rootUri, folderStack)
                 } else {
-                    libraryRepository.searchBrowserEntries(rootUri, folderSearchQuery)
+                    libraryRepository.searchBrowserEntries(rootUri, appliedFolderSearchQuery)
                 }
             }
     }
@@ -315,8 +319,8 @@ fun GraviMusicPlayerApp() {
                             browserSortAscending,
                         )
                         val filteredTagGroups = tagGroups.filter {
-                            genreSearchQuery.isBlank() || it.name.contains(
-                                genreSearchQuery,
+                            appliedGenreSearchQuery.isBlank() || it.name.contains(
+                                appliedGenreSearchQuery,
                                 ignoreCase = true
                             )
                         }.let { groups ->
@@ -340,7 +344,13 @@ fun GraviMusicPlayerApp() {
                                 showThumbnails = showBrowserThumbnails,
                                 isFolderActionRunning = isFolderActionRunning,
                                 onChooseFolder = { folderPicker.launch(null) },
-                                onSearchQueryChanged = { folderSearchQuery = it },
+                                onSearchQueryChanged = { query ->
+                                    folderSearchQuery = query
+                                    if (query.isBlank()) appliedFolderSearchQuery = ""
+                                },
+                                onSearchSubmitted = {
+                                    appliedFolderSearchQuery = folderSearchQuery
+                                },
                                 onSortModeChanged = { browserSortMode = it },
                                 onToggleSortDirection = {
                                     browserSortAscending = !browserSortAscending
@@ -349,6 +359,7 @@ fun GraviMusicPlayerApp() {
                                     folderStack =
                                         it.uriString.split('/').filter { part -> part.isNotBlank() }
                                     folderSearchQuery = ""
+                                    appliedFolderSearchQuery = ""
                                 },
                                 onBack = { folderStack = folderStack.dropLast(1) },
                                 onPlayFolder = {
@@ -468,7 +479,7 @@ fun GraviMusicPlayerApp() {
                                         isFolderActionRunning = true
                                         try {
                                             val queue =
-                                                if (folderSearchQuery.isBlank() || queueSearchResults) {
+                                                if (appliedFolderSearchQuery.isBlank() || queueSearchResults) {
                                                     sortedBrowserEntries.mapNotNull { it.audioItem }
                                                 } else {
                                                     withContext(Dispatchers.IO) {
@@ -482,7 +493,7 @@ fun GraviMusicPlayerApp() {
                                                 queue.indexOfFirst { it.uriString == selectedItem.uriString }
                                                     .coerceAtLeast(0)
                                             val queueName =
-                                                if (folderSearchQuery.isBlank() || queueSearchResults) {
+                                                if (appliedFolderSearchQuery.isBlank() || queueSearchResults) {
                                                     folderQueueName(folderStack)
                                                 } else {
                                                     folderQueueName(selectedFolderStack)
@@ -520,7 +531,13 @@ fun GraviMusicPlayerApp() {
                                 searchQuery = genreSearchQuery,
                                 sortAscending = genreSortAscending,
                                 onChooseFolder = { folderPicker.launch(null) },
-                                onSearchQueryChanged = { genreSearchQuery = it },
+                                onSearchQueryChanged = { query ->
+                                    genreSearchQuery = query
+                                    if (query.isBlank()) appliedGenreSearchQuery = ""
+                                },
+                                onSearchSubmitted = {
+                                    appliedGenreSearchQuery = genreSearchQuery
+                                },
                                 onToggleSortDirection = {
                                     genreSortAscending = !genreSortAscending
                                 },

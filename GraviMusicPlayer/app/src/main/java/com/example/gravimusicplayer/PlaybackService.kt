@@ -54,7 +54,7 @@ class PlaybackService : Service() {
     private var snapshot = PlaybackSnapshot()
     private var connectedBluetoothOutputDeviceIds = emptySet<Int>()
     private var silenceAnalyzer: SilenceAnalyzer? = null
-    private var skipSilenceEnabled = true
+    private var skipSilenceEnabled = false
     private var silenceAnalysisRequest = 0
     private var trimStartPositionMs = 0
     private var trimEndPositionMs: Int? = null
@@ -115,10 +115,6 @@ class PlaybackService : Service() {
         silenceAnalyzer = SilenceAnalyzer(this)
         player?.addListener(playbackListener)
         mediaSession = MediaSessionCompat(this, "Gravi Music Player").apply {
-            setFlags(
-                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
-                        MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
-            )
             setCallback(mediaSessionCallback)
             isActive = true
         }

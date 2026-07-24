@@ -37,6 +37,7 @@ fun GenresScreen(
     sortAscending: Boolean,
     onChooseFolder: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
+    onSearchSubmitted: () -> Unit,
     onToggleSortDirection: () -> Unit,
     onPlayTag: (TagGroup) -> Unit,
 ) {
@@ -67,6 +68,7 @@ fun GenresScreen(
             SearchTextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChanged,
+                onSearch = onSearchSubmitted,
                 modifier = Modifier.weight(1f),
             )
             SortDirectionButton(sortAscending, onToggleSortDirection)
@@ -123,6 +125,7 @@ fun GenresScreenPreview() {
             sortAscending = true,
             onChooseFolder = {},
             onSearchQueryChanged = {},
+            onSearchSubmitted = {},
             onToggleSortDirection = {},
             onPlayTag = {},
         )
