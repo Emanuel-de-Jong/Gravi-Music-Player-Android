@@ -273,21 +273,26 @@ class LibraryRepository(private val context: Context) {
         metadataCacheFile: AudioMetadataCacheFile? = null,
     ): AudioItem {
         return AudioItem(
-            uriString,
-            title,
-            folderPath,
-            genreCacheFile?.tags ?: genreSeparator?.let { readGenreTags(uriString.toUri(), it) }
+            uriString = uriString,
+            title = title,
+            folderPath = folderPath,
+            tags = genreCacheFile?.tags ?: genreSeparator?.let {
+                readGenreTags(
+                    uriString.toUri(),
+                    it
+                )
+            }
             ?: emptyList(),
-            artworkUriString,
-            metadataCacheFile?.mimeType,
-            metadataCacheFile?.bitrate,
-            metadataCacheFile?.durationMs,
-            metadataCacheFile?.artist,
-            metadataCacheFile?.releaseDate,
-            metadataCacheFile?.lyrics,
-            lastModifiedMs,
-            sizeBytes,
-            metadataCacheFile?.metadataTitle,
+            artworkUriString = artworkUriString,
+            mimeType = metadataCacheFile?.mimeType,
+            bitrate = metadataCacheFile?.bitrate,
+            durationMs = metadataCacheFile?.durationMs,
+            artist = metadataCacheFile?.artist,
+            releaseDate = metadataCacheFile?.releaseDate,
+            lyrics = metadataCacheFile?.lyrics,
+            lastModifiedMs = lastModifiedMs,
+            sizeBytes = sizeBytes,
+            metadataTitle = metadataCacheFile?.metadataTitle,
         )
     }
 

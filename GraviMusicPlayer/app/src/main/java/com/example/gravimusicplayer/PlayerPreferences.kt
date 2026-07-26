@@ -48,6 +48,12 @@ class PlayerPreferences(context: Context) {
             preferences.edit { putBoolean(KEY_SKIP_SILENCE_ENABLED, value) }
         }
 
+    var loudnessNormalizationEnabled: Boolean
+        get() = preferences.getBoolean(KEY_LOUDNESS_NORMALIZATION_ENABLED, true)
+        set(value) {
+            preferences.edit { putBoolean(KEY_LOUDNESS_NORMALIZATION_ENABLED, value) }
+        }
+
     var graviPickerSettings: GraviPickerSettings
         get() = GraviPickerSettings(
             depth = preferences.getInt(KEY_GRAVI_DEPTH, 2),
@@ -133,6 +139,7 @@ class PlayerPreferences(context: Context) {
         private const val KEY_SHOW_BROWSER_THUMBNAILS = "show_browser_thumbnails"
         private const val KEY_QUEUE_SEARCH_RESULTS = "queue_search_results"
         private const val KEY_SKIP_SILENCE_ENABLED = "skip_silence_enabled"
+        private const val KEY_LOUDNESS_NORMALIZATION_ENABLED = "loudness_normalization_enabled"
         private const val KEY_GRAVI_DEPTH = "gravi_depth"
         private const val KEY_GRAVI_PARENT_ODDS = "gravi_parent_odds"
         private const val KEY_GRAVI_CHILD_ODDS = "gravi_child_odds"

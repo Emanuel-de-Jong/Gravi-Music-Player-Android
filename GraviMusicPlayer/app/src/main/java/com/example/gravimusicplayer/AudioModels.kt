@@ -15,6 +15,8 @@ data class AudioItem(
     val artist: String? = null,
     val releaseDate: String? = null,
     val lyrics: String? = null,
+    val replayGainTrackGainDb: Float? = null,
+    val replayGainTrackPeak: Float? = null,
     val lastModifiedMs: Long = 0,
     val sizeBytes: Long = 0,
     val metadataTitle: String? = null,

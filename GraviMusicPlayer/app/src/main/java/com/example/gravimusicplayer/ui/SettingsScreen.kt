@@ -46,6 +46,7 @@ fun SettingsScreen(
     showBrowserThumbnails: Boolean,
     queueSearchResults: Boolean,
     skipSilenceEnabled: Boolean,
+    loudnessNormalizationEnabled: Boolean,
     graviPickerSettings: GraviPickerSettings,
     onChooseFolder: () -> Unit,
     onDefaultStartPlayOrderChanged: (DefaultStartPlayOrder) -> Unit,
@@ -54,6 +55,7 @@ fun SettingsScreen(
     onShowBrowserThumbnailsChanged: (Boolean) -> Unit,
     onQueueSearchResultsChanged: (Boolean) -> Unit,
     onSkipSilenceEnabledChanged: (Boolean) -> Unit,
+    onLoudnessNormalizationChanged: (Boolean) -> Unit,
     onGraviPickerSettingsChanged: (GraviPickerSettings) -> Unit,
     onResetSettings: () -> Unit,
     onClearCaches: () -> Unit,
@@ -97,6 +99,12 @@ fun SettingsScreen(
             checked = skipSilenceEnabled,
             infoText = "Reduces more than 1.5 seconds of near-silent/static padding to 1.5 seconds. Quiet musical intros/outros are kept.",
             onCheckedChanged = onSkipSilenceEnabledChanged,
+        )
+        SwitchSettingRow(
+            label = "Loudness normalization",
+            checked = loudnessNormalizationEnabled,
+            infoText = "Uses ReplayGain track gain and peak metadata to adjust each song volume while avoiding clipping.",
+            onCheckedChanged = onLoudnessNormalizationChanged,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -371,6 +379,7 @@ fun SettingsScreenPreview() {
             showBrowserThumbnails = true,
             queueSearchResults = true,
             skipSilenceEnabled = true,
+            loudnessNormalizationEnabled = true,
             graviPickerSettings = GraviPickerSettings(),
             onChooseFolder = {},
             onDefaultStartPlayOrderChanged = {},
@@ -379,6 +388,7 @@ fun SettingsScreenPreview() {
             onShowBrowserThumbnailsChanged = {},
             onQueueSearchResultsChanged = {},
             onSkipSilenceEnabledChanged = {},
+            onLoudnessNormalizationChanged = {},
             onGraviPickerSettingsChanged = {},
             onResetSettings = {},
             onClearCaches = {},

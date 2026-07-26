@@ -90,6 +90,9 @@ fun GraviMusicPlayerApp() {
     var showBrowserThumbnails by rememberSaveable { mutableStateOf(preferences.showBrowserThumbnails) }
     var queueSearchResults by rememberSaveable { mutableStateOf(preferences.queueSearchResults) }
     var skipSilenceEnabled by rememberSaveable { mutableStateOf(preferences.skipSilenceEnabled) }
+    var loudnessNormalizationEnabled by rememberSaveable {
+        mutableStateOf(preferences.loudnessNormalizationEnabled)
+    }
     var graviPickerSettings by remember { mutableStateOf(preferences.graviPickerSettings) }
     var pendingPlaylistExport by remember { mutableStateOf<List<AudioItem>?>(null) }
     var isFolderActionRunning by remember { mutableStateOf(false) }
@@ -160,6 +163,7 @@ fun GraviMusicPlayerApp() {
                 playbackService = boundService
                 boundService.setLoopMode(savedLoopMode)
                 boundService.setSkipSilenceEnabled(skipSilenceEnabled)
+                boundService.setLoudnessNormalizationEnabled(loudnessNormalizationEnabled)
                 playbackSnapshot = boundService.getSnapshot()
                 boundService.setListener { playbackSnapshot = it }
                 pendingPlaybackRequest?.let {
@@ -572,6 +576,7 @@ fun GraviMusicPlayerApp() {
                                 showBrowserThumbnails = showBrowserThumbnails,
                                 queueSearchResults = queueSearchResults,
                                 skipSilenceEnabled = skipSilenceEnabled,
+                                loudnessNormalizationEnabled = loudnessNormalizationEnabled,
                                 graviPickerSettings = graviPickerSettings,
                                 onChooseFolder = { folderPicker.launch(null) },
                                 onDefaultStartPlayOrderChanged = {
@@ -601,6 +606,11 @@ fun GraviMusicPlayerApp() {
                                     preferences.skipSilenceEnabled = it
                                     playbackService?.setSkipSilenceEnabled(it)
                                 },
+                                onLoudnessNormalizationChanged = {
+                                    loudnessNormalizationEnabled = it
+                                    preferences.loudnessNormalizationEnabled = it
+                                    playbackService?.setLoudnessNormalizationEnabled(it)
+                                },
                                 onGraviPickerSettingsChanged = {
                                     graviPickerSettings = it
                                     preferences.graviPickerSettings = it
@@ -614,9 +624,14 @@ fun GraviMusicPlayerApp() {
                                     showBrowserThumbnails = preferences.showBrowserThumbnails
                                     queueSearchResults = preferences.queueSearchResults
                                     skipSilenceEnabled = preferences.skipSilenceEnabled
+                                    loudnessNormalizationEnabled =
+                                        preferences.loudnessNormalizationEnabled
                                     graviPickerSettings = preferences.graviPickerSettings
                                     playbackService?.setLoopMode(savedLoopMode)
                                     playbackService?.setSkipSilenceEnabled(skipSilenceEnabled)
+                                    playbackService?.setLoudnessNormalizationEnabled(
+                                        loudnessNormalizationEnabled
+                                    )
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++
                                 },

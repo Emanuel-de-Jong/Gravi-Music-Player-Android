@@ -42,6 +42,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.min
+import kotlin.math.pow
 
 class PlaybackService : Service() {
     private val binder = PlaybackBinder()
@@ -55,6 +57,7 @@ class PlaybackService : Service() {
     private var connectedBluetoothOutputDeviceIds = emptySet<Int>()
     private var silenceAnalyzer: SilenceAnalyzer? = null
     private var skipSilenceEnabled = false
+    private var loudnessNormalizationEnabled = true
     private var silenceAnalysisRequest = 0
     private var trimStartPositionMs = 0
     private var trimEndPositionMs: Int? = null
@@ -323,6 +326,11 @@ class PlaybackService : Service() {
         }
     }
 
+    fun setLoudnessNormalizationEnabled(enabled: Boolean) {
+        loudnessNormalizationEnabled = enabled
+        applyReplayGainVolume(snapshot.currentItem)
+    }
+
     private fun playIndex(index: Int) {
         performanceProfiler.measure("PlaybackService.playIndex") {
             val item = snapshot.queue.getOrNull(index) ?: return@measure
@@ -334,6 +342,7 @@ class PlaybackService : Service() {
             currentPlayer.stop()
             currentPlayer.clearMediaItems()
             currentPlayer.setMediaItem(MediaItem.fromUri(playbackItem.uri))
+            applyReplayGainVolume(playbackItem)
             currentPlayer.prepare()
             silenceAnalysisRequest++
             trimStartPositionMs = 0
@@ -616,13 +625,20 @@ class PlaybackService : Service() {
     }
 
     private fun readPlaybackMetadata(item: AudioItem): AudioItem {
-        if (item.mimeType != null && item.bitrate != null && item.durationMs != null && item.lyrics != null) return item
+        if (item.mimeType != null &&
+            item.bitrate != null &&
+            item.durationMs != null &&
+            item.lyrics != null &&
+            item.replayGainTrackGainDb != null &&
+            item.replayGainTrackPeak != null
+        ) return item
 
         return performanceProfiler.measure("PlaybackService.readPlaybackMetadata") {
             val retriever = MediaMetadataRetriever()
             try {
                 runCatching {
                     retriever.setDataSource(this, item.uri)
+                    val replayGainMetadata = Mp3ReplayGainReader.readReplayGain(this, item.uri)
                     item.copy(
                         mimeType = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE),
                         bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
@@ -630,12 +646,29 @@ class PlaybackService : Service() {
                         durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                             ?.toLongOrNull(),
                         lyrics = Mp3LyricsReader.readLyrics(this, item.uri),
+                        replayGainTrackGainDb = replayGainMetadata?.trackGainDb,
+                        replayGainTrackPeak = replayGainMetadata?.trackPeak,
                     )
                 }.getOrDefault(item)
             } finally {
                 retriever.release()
             }
         }
+    }
+
+    private fun applyReplayGainVolume(item: AudioItem?) {
+        val currentPlayer = player ?: return
+        currentPlayer.volume = replayGainVolume(item)
+    }
+
+    private fun replayGainVolume(item: AudioItem?): Float {
+        if (!loudnessNormalizationEnabled) return 1f
+
+        val gainDb = item?.replayGainTrackGainDb ?: return 1f
+        val baseGain = 10f.pow(gainDb / 20f)
+        val peak = item.replayGainTrackPeak
+        val peakSafeGain = if (peak != null && peak > 0f) 1f / peak else baseGain
+        return min(baseGain, peakSafeGain).coerceIn(0f, 1f)
     }
 
     private fun servicePendingIntent(action: String, requestCode: Int): PendingIntent {
