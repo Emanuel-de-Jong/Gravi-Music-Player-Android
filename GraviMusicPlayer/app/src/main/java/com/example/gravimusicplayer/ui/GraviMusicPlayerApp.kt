@@ -527,6 +527,12 @@ fun GraviMusicPlayerApp() {
                                         }
                                     }
                                 },
+                                onAddFileToQueue = { entry ->
+                                    entry.audioItem?.let { playbackService?.addToQueue(it, false) }
+                                },
+                                onAddFileToQueueAndPlay = { entry ->
+                                    entry.audioItem?.let { playbackService?.addToQueue(it, true) }
+                                },
                             )
 
                             AppDestinations.GENRES -> GenresScreen(

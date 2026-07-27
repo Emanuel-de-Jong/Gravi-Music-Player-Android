@@ -278,6 +278,27 @@ class PlaybackService : Service() {
         playIndex(index)
     }
 
+    fun addToQueue(item: AudioItem, playImmediately: Boolean) {
+        if (snapshot.queue.isEmpty()) {
+            playQueue(
+                queue = listOf(item),
+                startIndex = 0,
+                queueType = QueueType.FOLDER,
+                queueName = item.folderPath,
+                queueOrder = QueueOrder.ORDERED,
+            )
+            return
+        }
+
+        val insertionIndex = (snapshot.currentIndex + 1).coerceIn(0, snapshot.queue.size)
+        val updatedQueue = snapshot.queue.toMutableList().apply {
+            add(insertionIndex, item)
+        }
+        snapshot = snapshot.copy(queue = updatedQueue, errorMessage = null)
+        notifyListener()
+        if (playImmediately) playIndex(insertionIndex)
+    }
+
     fun seekTo(positionMs: Int) {
         val currentPlayer = player ?: return
         currentPlayer.seekTo(positionMs.coerceIn(0, safeDuration(currentPlayer)).toLong())

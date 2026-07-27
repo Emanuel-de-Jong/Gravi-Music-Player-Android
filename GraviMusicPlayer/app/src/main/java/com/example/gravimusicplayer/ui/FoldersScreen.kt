@@ -1,6 +1,6 @@
 package com.example.gravimusicplayer.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -71,6 +72,8 @@ fun FoldersScreen(
     onGraviShuffleFolder: () -> Unit,
     onExportFolder: () -> Unit,
     onPlayFile: (BrowserEntry) -> Unit,
+    onAddFileToQueue: (BrowserEntry) -> Unit,
+    onAddFileToQueueAndPlay: (BrowserEntry) -> Unit,
 ) {
     val listState = rememberLazyListState()
 
@@ -171,6 +174,8 @@ fun FoldersScreen(
                     onClick = {
                         if (entry.isDirectory) onOpenFolder(entry) else onPlayFile(entry)
                     },
+                    onAddToQueue = { onAddFileToQueue(entry) },
+                    onAddToQueueAndPlay = { onAddFileToQueueAndPlay(entry) },
                 )
             }
         }
@@ -217,33 +222,76 @@ private fun BrowserSortModeSelector(
 }
 
 @Composable
-private fun BrowserEntryRow(entry: BrowserEntry, showThumbnails: Boolean, onClick: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+private fun BrowserEntryRow(
+    entry: BrowserEntry,
+    showThumbnails: Boolean,
+    onClick: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onAddToQueueAndPlay: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
+    Box {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(entry.isDirectory) {
+                    detectTapGestures(
+                        onTap = { onClick() },
+                        onLongPress = {
+                            if (!entry.isDirectory) menuExpanded = true
+                        },
+                    )
+                },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         ) {
-            if (entry.isDirectory) {
-                Icon(Icons.Filled.Folder, contentDescription = null)
-            } else if (showThumbnails) {
-                BrowserThumbnail(entry.audioItem?.artworkUriString)
-            }
-            Text(
-                entry.name,
-                modifier = Modifier.weight(1f),
-            )
-            if (entry.trackCount != null) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (entry.isDirectory) {
+                    Icon(Icons.Filled.Folder, contentDescription = null)
+                } else if (showThumbnails) {
+                    BrowserThumbnail(entry.audioItem?.artworkUriString)
+                }
                 Text(
-                    formatTrackCount(entry.trackCount),
-                    style = MaterialTheme.typography.bodySmall
+                    entry.name,
+                    modifier = Modifier.weight(1f),
                 )
+                if (entry.trackCount != null) {
+                    Text(
+                        formatTrackCount(entry.trackCount),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Play") },
+                onClick = {
+                    menuExpanded = false
+                    onClick()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to queue") },
+                onClick = {
+                    menuExpanded = false
+                    onAddToQueue()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Add to queue and play") },
+                onClick = {
+                    menuExpanded = false
+                    onAddToQueueAndPlay()
+                },
+            )
         }
     }
 }
@@ -287,6 +335,8 @@ fun FoldersScreenPreview() {
             onGraviShuffleFolder = {},
             onExportFolder = {},
             onPlayFile = {},
+            onAddFileToQueue = {},
+            onAddFileToQueueAndPlay = {},
         )
     }
 }
