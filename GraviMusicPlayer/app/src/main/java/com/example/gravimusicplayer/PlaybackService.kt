@@ -299,6 +299,31 @@ class PlaybackService : Service() {
         if (playImmediately) playIndex(insertionIndex)
     }
 
+    fun removeQueueItem(index: Int) {
+        if (index !in snapshot.queue.indices) return
+
+        val updatedQueue = snapshot.queue.toMutableList().apply {
+            removeAt(index)
+        }
+        if (updatedQueue.isEmpty()) {
+            stopPlayback()
+            return
+        }
+
+        val currentIndex = snapshot.currentIndex
+        if (index == currentIndex) {
+            val nextIndex = index.coerceAtMost(updatedQueue.lastIndex)
+            snapshot = snapshot.copy(queue = updatedQueue, currentIndex = nextIndex)
+            playIndex(nextIndex)
+        } else {
+            snapshot = snapshot.copy(
+                queue = updatedQueue,
+                currentIndex = if (index < currentIndex) currentIndex - 1 else currentIndex,
+            )
+            notifyListener()
+        }
+    }
+
     fun seekTo(positionMs: Int) {
         val currentPlayer = player ?: return
         currentPlayer.seekTo(positionMs.coerceIn(0, safeDuration(currentPlayer)).toLong())

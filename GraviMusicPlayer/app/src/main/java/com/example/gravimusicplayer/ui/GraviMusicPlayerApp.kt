@@ -303,6 +303,7 @@ fun GraviMusicPlayerApp() {
                     onPrevious = { playbackService?.playPrevious() },
                     onSeek = { playbackService?.seekTo(it) },
                     onPlayQueueIndex = { playbackService?.playQueueIndex(it) },
+                    onRemoveQueueItem = { playbackService?.removeQueueItem(it) },
                     onShuffleQueue = { playbackService?.shuffleQueue() },
                     showThumbnails = showBrowserThumbnails,
                     waveformValues = waveformValues.takeIf {

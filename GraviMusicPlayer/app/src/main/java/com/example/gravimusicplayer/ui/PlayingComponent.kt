@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -125,6 +126,7 @@ fun PlayScreen(
     onPrevious: () -> Unit,
     onSeek: (Int) -> Unit,
     onPlayQueueIndex: (Int) -> Unit,
+    onRemoveQueueItem: (Int) -> Unit,
     onShuffleQueue: () -> Unit,
     showThumbnails: Boolean,
     waveformValues: List<Float>,
@@ -230,6 +232,7 @@ fun PlayScreen(
         NowPlayingTabs(
             snapshot = snapshot,
             onPlayQueueIndex = onPlayQueueIndex,
+            onRemoveQueueItem = onRemoveQueueItem,
             showThumbnails = showThumbnails,
             modifier = Modifier.weight(1f),
         )
@@ -311,6 +314,7 @@ private enum class NowPlayingTab(
 private fun NowPlayingTabs(
     snapshot: PlaybackSnapshot,
     onPlayQueueIndex: (Int) -> Unit,
+    onRemoveQueueItem: (Int) -> Unit,
     showThumbnails: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -338,6 +342,7 @@ private fun NowPlayingTabs(
             NowPlayingTab.QUEUE -> QueueList(
                 snapshot = snapshot,
                 onPlayQueueIndex = onPlayQueueIndex,
+                onRemoveQueueItem = onRemoveQueueItem,
                 showThumbnails = showThumbnails,
                 modifier = Modifier.weight(1f),
             )
@@ -438,6 +443,7 @@ private fun LoopModeSelector(
 private fun QueueList(
     snapshot: PlaybackSnapshot,
     onPlayQueueIndex: (Int) -> Unit,
+    onRemoveQueueItem: (Int) -> Unit,
     showThumbnails: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -515,7 +521,12 @@ private fun QueueList(
                     ),
                 ) {
                     Row(
-                        modifier = Modifier.padding(10.dp),
+                        modifier = Modifier.padding(
+                            start = 10.dp,
+                            top = 10.dp,
+                            end = 2.dp,
+                            bottom = 10.dp
+                        ),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -535,6 +546,16 @@ private fun QueueList(
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        IconButton(
+                            onClick = { onRemoveQueueItem(index) },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Remove from queue",
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
@@ -591,6 +612,7 @@ fun PlayScreenPreview() {
             onPrevious = {},
             onSeek = {},
             onPlayQueueIndex = {},
+            onRemoveQueueItem = {},
             onShuffleQueue = {},
             showThumbnails = false,
             waveformValues = emptyList(),
