@@ -36,6 +36,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.gravimusicplayer.DefaultStartPlayOrder
 import com.example.gravimusicplayer.GraviPickerSettings
+import com.example.gravimusicplayer.PlayerSettings
 import com.example.gravimusicplayer.ui.theme.GraviMusicPlayerTheme
 
 @Composable
@@ -380,16 +381,17 @@ private fun InfoPopupButton(title: String, text: String) {
 @Composable
 fun SettingsScreenPreview() {
     GraviMusicPlayerTheme {
+        val settings = PlayerSettings()
         SettingsScreen(
             rootUriString = null,
-            defaultStartPlayOrder = DefaultStartPlayOrder.ORDERED,
-            genreSeparator = ";",
-            showBrowserThumbnails = true,
-            queueSearchResults = true,
-            skipSilenceEnabled = true,
-            loudnessNormalizationEnabled = true,
-            fineGrainedVolumeEnabled = true,
-            graviPickerSettings = GraviPickerSettings(),
+            defaultStartPlayOrder = settings.defaultStartPlayOrder,
+            genreSeparator = settings.genreSeparator,
+            showBrowserThumbnails = settings.showBrowserThumbnails,
+            queueSearchResults = settings.queueSearchResults,
+            skipSilenceEnabled = settings.skipSilenceEnabled,
+            loudnessNormalizationEnabled = settings.loudnessNormalizationEnabled,
+            fineGrainedVolumeEnabled = settings.fineGrainedVolumeEnabled,
+            graviPickerSettings = settings.graviPickerSettings,
             onChooseFolder = {},
             onDefaultStartPlayOrderChanged = {},
             onGenreSeparatorChanged = {},

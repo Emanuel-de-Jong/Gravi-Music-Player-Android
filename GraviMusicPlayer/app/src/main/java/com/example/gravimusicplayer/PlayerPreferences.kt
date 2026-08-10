@@ -6,6 +6,41 @@ import androidx.core.content.edit
 class PlayerPreferences(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
+    var settings: PlayerSettings
+        get() = PlayerSettings(
+            defaultStartPlayOrder = defaultStartPlayOrder,
+            loopMode = loopMode,
+            genreSeparator = genreSeparator,
+            showBrowserThumbnails = showBrowserThumbnails,
+            queueSearchResults = queueSearchResults,
+            skipSilenceEnabled = skipSilenceEnabled,
+            loudnessNormalizationEnabled = loudnessNormalizationEnabled,
+            fineGrainedVolumeEnabled = fineGrainedVolumeEnabled,
+            graviPickerSettings = graviPickerSettings,
+        )
+        set(value) {
+            val safeValue = value.copy(
+                genreSeparator = value.genreSeparator.ifBlank {
+                    DEFAULT_PLAYER_SETTINGS.genreSeparator
+                },
+                graviPickerSettings = value.graviPickerSettings.sanitized(),
+            )
+            preferences.edit {
+                putString(KEY_DEFAULT_START_PLAY_ORDER, safeValue.defaultStartPlayOrder.name)
+                putString(KEY_LOOP_MODE, safeValue.loopMode.name)
+                putString(KEY_GENRE_SEPARATOR, safeValue.genreSeparator)
+                putBoolean(KEY_SHOW_BROWSER_THUMBNAILS, safeValue.showBrowserThumbnails)
+                putBoolean(KEY_QUEUE_SEARCH_RESULTS, safeValue.queueSearchResults)
+                putBoolean(KEY_SKIP_SILENCE_ENABLED, safeValue.skipSilenceEnabled)
+                putBoolean(
+                    KEY_LOUDNESS_NORMALIZATION_ENABLED,
+                    safeValue.loudnessNormalizationEnabled
+                )
+                putBoolean(KEY_FINE_GRAINED_VOLUME_ENABLED, safeValue.fineGrainedVolumeEnabled)
+                putGraviPickerSettings(safeValue.graviPickerSettings)
+            }
+        }
+
     var rootUriString: String?
         get() = preferences.getString(KEY_ROOT_URI, null)
         set(value) {
@@ -13,86 +48,125 @@ class PlayerPreferences(context: Context) {
         }
 
     var defaultStartPlayOrder: DefaultStartPlayOrder
-        get() = loadMode(KEY_DEFAULT_START_PLAY_ORDER, DefaultStartPlayOrder.ORDERED)
+        get() = loadMode(
+            KEY_DEFAULT_START_PLAY_ORDER,
+            DEFAULT_PLAYER_SETTINGS.defaultStartPlayOrder
+        )
         set(value) {
             preferences.edit { putString(KEY_DEFAULT_START_PLAY_ORDER, value.name) }
         }
 
     var loopMode: LoopMode
-        get() = loadMode(KEY_LOOP_MODE, LoopMode.QUEUE)
+        get() = loadMode(KEY_LOOP_MODE, DEFAULT_PLAYER_SETTINGS.loopMode)
         set(value) {
             preferences.edit { putString(KEY_LOOP_MODE, value.name) }
         }
 
     var genreSeparator: String
-        get() = preferences.getString(KEY_GENRE_SEPARATOR, ";").orEmpty().ifBlank { ";" }
+        get() = preferences.getString(
+            KEY_GENRE_SEPARATOR,
+            DEFAULT_PLAYER_SETTINGS.genreSeparator
+        ).orEmpty().ifBlank { DEFAULT_PLAYER_SETTINGS.genreSeparator }
         set(value) {
-            preferences.edit { putString(KEY_GENRE_SEPARATOR, value.ifBlank { ";" }) }
+            preferences.edit {
+                putString(
+                    KEY_GENRE_SEPARATOR,
+                    value.ifBlank { DEFAULT_PLAYER_SETTINGS.genreSeparator }
+                )
+            }
         }
 
     var showBrowserThumbnails: Boolean
-        get() = preferences.getBoolean(KEY_SHOW_BROWSER_THUMBNAILS, true)
+        get() = preferences.getBoolean(
+            KEY_SHOW_BROWSER_THUMBNAILS,
+            DEFAULT_PLAYER_SETTINGS.showBrowserThumbnails
+        )
         set(value) {
             preferences.edit { putBoolean(KEY_SHOW_BROWSER_THUMBNAILS, value) }
         }
 
     var queueSearchResults: Boolean
-        get() = preferences.getBoolean(KEY_QUEUE_SEARCH_RESULTS, true)
+        get() = preferences.getBoolean(
+            KEY_QUEUE_SEARCH_RESULTS,
+            DEFAULT_PLAYER_SETTINGS.queueSearchResults
+        )
         set(value) {
             preferences.edit { putBoolean(KEY_QUEUE_SEARCH_RESULTS, value) }
         }
 
     var skipSilenceEnabled: Boolean
-        get() = preferences.getBoolean(KEY_SKIP_SILENCE_ENABLED, true)
+        get() = preferences.getBoolean(
+            KEY_SKIP_SILENCE_ENABLED,
+            DEFAULT_PLAYER_SETTINGS.skipSilenceEnabled
+        )
         set(value) {
             preferences.edit { putBoolean(KEY_SKIP_SILENCE_ENABLED, value) }
         }
 
     var loudnessNormalizationEnabled: Boolean
-        get() = preferences.getBoolean(KEY_LOUDNESS_NORMALIZATION_ENABLED, true)
+        get() = preferences.getBoolean(
+            KEY_LOUDNESS_NORMALIZATION_ENABLED,
+            DEFAULT_PLAYER_SETTINGS.loudnessNormalizationEnabled
+        )
         set(value) {
             preferences.edit { putBoolean(KEY_LOUDNESS_NORMALIZATION_ENABLED, value) }
         }
 
     var fineGrainedVolumeEnabled: Boolean
-        get() = preferences.getBoolean(KEY_FINE_GRAINED_VOLUME_ENABLED, true)
+        get() = preferences.getBoolean(
+            KEY_FINE_GRAINED_VOLUME_ENABLED,
+            DEFAULT_PLAYER_SETTINGS.fineGrainedVolumeEnabled
+        )
         set(value) {
             preferences.edit { putBoolean(KEY_FINE_GRAINED_VOLUME_ENABLED, value) }
         }
 
     var graviPickerSettings: GraviPickerSettings
         get() = GraviPickerSettings(
-            depth = preferences.getInt(KEY_GRAVI_DEPTH, 2),
-            parentOdds = preferences.getBoolean(KEY_GRAVI_PARENT_ODDS, true),
-            childOdds = preferences.getBoolean(KEY_GRAVI_CHILD_ODDS, true),
-            evenOddsMinFileCount = preferences.getInt(KEY_GRAVI_EVEN_ODDS_MIN_FILE_COUNT, 5),
-            lessLikelyDivisor = preferences.getFloat(KEY_GRAVI_LESS_LIKELY_DIVISOR, 2f),
-            queueEntries = preferences.getInt(KEY_GRAVI_QUEUE_ENTRIES, 100),
+            depth = preferences.getInt(
+                KEY_GRAVI_DEPTH,
+                DEFAULT_PLAYER_SETTINGS.graviPickerSettings.depth
+            ),
+            parentOdds = preferences.getBoolean(
+                KEY_GRAVI_PARENT_ODDS,
+                DEFAULT_PLAYER_SETTINGS.graviPickerSettings.parentOdds
+            ),
+            childOdds = preferences.getBoolean(
+                KEY_GRAVI_CHILD_ODDS,
+                DEFAULT_PLAYER_SETTINGS.graviPickerSettings.childOdds
+            ),
+            evenOddsMinFileCount = preferences.getInt(
+                KEY_GRAVI_EVEN_ODDS_MIN_FILE_COUNT,
+                DEFAULT_PLAYER_SETTINGS.graviPickerSettings.evenOddsMinFileCount
+            ),
+            lessLikelyDivisor = preferences.getFloat(
+                KEY_GRAVI_LESS_LIKELY_DIVISOR,
+                DEFAULT_PLAYER_SETTINGS.graviPickerSettings.lessLikelyDivisor
+            ),
+            queueEntries = preferences.getInt(
+                KEY_GRAVI_QUEUE_ENTRIES,
+                DEFAULT_PLAYER_SETTINGS.graviPickerSettings.queueEntries
+            ),
             edgeCaseFolderDepths = parseEdgeCaseFolderDepths(
-                preferences.getString(KEY_GRAVI_EDGE_CASE_FOLDER_DEPTHS, "").orEmpty()
+                preferences.getString(
+                    KEY_GRAVI_EDGE_CASE_FOLDER_DEPTHS,
+                    formatEdgeCaseFolderDepths(
+                        DEFAULT_PLAYER_SETTINGS.graviPickerSettings.edgeCaseFolderDepths
+                    )
+                ).orEmpty()
             ),
             blacklistFolders = parseBlacklistFolders(
-                preferences.getString(KEY_GRAVI_BLACKLIST_FOLDERS, "").orEmpty()
+                preferences.getString(
+                    KEY_GRAVI_BLACKLIST_FOLDERS,
+                    DEFAULT_PLAYER_SETTINGS.graviPickerSettings.blacklistFolders
+                        .sorted()
+                        .joinToString("\n")
+                ).orEmpty()
             ),
         ).sanitized()
         set(value) {
             val safeValue = value.sanitized()
-            preferences.edit {
-                putInt(KEY_GRAVI_DEPTH, safeValue.depth)
-                putBoolean(KEY_GRAVI_PARENT_ODDS, safeValue.parentOdds)
-                putBoolean(KEY_GRAVI_CHILD_ODDS, safeValue.childOdds)
-                putInt(KEY_GRAVI_EVEN_ODDS_MIN_FILE_COUNT, safeValue.evenOddsMinFileCount)
-                putFloat(KEY_GRAVI_LESS_LIKELY_DIVISOR, safeValue.lessLikelyDivisor)
-                putInt(KEY_GRAVI_QUEUE_ENTRIES, safeValue.queueEntries)
-                putString(
-                    KEY_GRAVI_EDGE_CASE_FOLDER_DEPTHS,
-                    formatEdgeCaseFolderDepths(safeValue.edgeCaseFolderDepths)
-                )
-                putString(
-                    KEY_GRAVI_BLACKLIST_FOLDERS,
-                    safeValue.blacklistFolders.sorted().joinToString("\n")
-                )
-            }
+            preferences.edit { putGraviPickerSettings(safeValue) }
         }
 
     fun resetSettingsExceptRootUri() {
@@ -127,6 +201,25 @@ class PlayerPreferences(context: Context) {
         return value.entries
             .sortedBy { it.key }
             .joinToString("\n") { "${it.key}=${it.value}" }
+    }
+
+    private fun android.content.SharedPreferences.Editor.putGraviPickerSettings(
+        value: GraviPickerSettings
+    ) {
+        putInt(KEY_GRAVI_DEPTH, value.depth)
+        putBoolean(KEY_GRAVI_PARENT_ODDS, value.parentOdds)
+        putBoolean(KEY_GRAVI_CHILD_ODDS, value.childOdds)
+        putInt(KEY_GRAVI_EVEN_ODDS_MIN_FILE_COUNT, value.evenOddsMinFileCount)
+        putFloat(KEY_GRAVI_LESS_LIKELY_DIVISOR, value.lessLikelyDivisor)
+        putInt(KEY_GRAVI_QUEUE_ENTRIES, value.queueEntries)
+        putString(
+            KEY_GRAVI_EDGE_CASE_FOLDER_DEPTHS,
+            formatEdgeCaseFolderDepths(value.edgeCaseFolderDepths)
+        )
+        putString(
+            KEY_GRAVI_BLACKLIST_FOLDERS,
+            value.blacklistFolders.sorted().joinToString("\n")
+        )
     }
 
     private fun parseBlacklistFolders(value: String): Set<String> {

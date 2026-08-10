@@ -63,6 +63,7 @@ class PlaybackService : Service() {
     private var fineVolumeProvider: VolumeProviderCompat? = null
     private var fineVolumePosition = 0
     private var fineVolumeSystemIndex = 0
+    private var expectedFineVolumeSystemIndex: Int? = null
     private var fineVolumeMinimumIndex = 0
     private var fineVolumeMaximumIndex = 0
     private var fineVolumeDeviceType = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
@@ -395,6 +396,7 @@ class PlaybackService : Service() {
         fineVolumeProvider = null
         fineVolumeCurve = null
         fineVolumeGain = 1f
+        expectedFineVolumeSystemIndex = null
         if (enabled) {
             synchronizeFineVolume()
             fineVolumeProvider = object : VolumeProviderCompat(
@@ -406,9 +408,6 @@ class PlaybackService : Service() {
                     adjustFineVolume(direction)
                 }
 
-                override fun onSetVolumeTo(volume: Int) {
-                    setFineVolume(volume)
-                }
             }
             mediaSession?.setPlaybackToRemote(fineVolumeProvider)
         } else {
@@ -769,25 +768,54 @@ class PlaybackService : Service() {
             .coerceIn(fineVolumeMinimumIndex, fineVolumeMaximumIndex)
         val targetCurve = fineVolumeCurve
         val targetDb = curveDb(targetCurve, targetSystemIndex)
-        val activeDb = curveDb(targetCurve, systemIndex)
-
-        if (audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) != systemIndex) {
+        if (fineVolumeSystemIndex != systemIndex) {
+            expectedFineVolumeSystemIndex = systemIndex
             audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, systemIndex, 0)
-        }
-        fineVolumePosition = safePosition
-        fineVolumeSystemIndex = systemIndex
-        fineVolumeGain = if (targetSubstep == 0 || targetDb == null || activeDb == null) {
-            if (targetSubstep == 0) 1f else ((3 - targetSubstep) / 3f)
+            fineVolumeSystemIndex = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            expectedFineVolumeSystemIndex = fineVolumeSystemIndex
         } else {
-            val lowerDb = curveDb(targetCurve, targetSystemIndex) ?: return
-            val upperDb =
-                curveDb(targetCurve, (targetSystemIndex + 1).coerceAtMost(fineVolumeMaximumIndex))
-                    ?: return
-            val interpolatedDb = lowerDb + (upperDb - lowerDb) * targetSubstep / 3f
-            10f.pow((interpolatedDb - activeDb) / 20f).coerceIn(0f, 1f)
+            expectedFineVolumeSystemIndex = systemIndex
         }
+        val actualSystemIndex = fineVolumeSystemIndex.coerceIn(
+            fineVolumeMinimumIndex,
+            fineVolumeMaximumIndex,
+        )
+        val nextFineGain = fineVolumeGainFor(
+            targetSystemIndex = targetSystemIndex,
+            targetSubstep = targetSubstep,
+            targetDb = targetDb,
+            actualSystemIndex = actualSystemIndex,
+        )
+        fineVolumePosition = safePosition
+        fineVolumeGain = nextFineGain
         fineVolumeProvider?.setCurrentVolume(fineVolumePosition)
         applyPlayerVolume(snapshot.currentItem)
+    }
+
+    private fun fineVolumeGainFor(
+        targetSystemIndex: Int,
+        targetSubstep: Int,
+        targetDb: Float?,
+        actualSystemIndex: Int,
+    ): Float {
+        if (targetSubstep == 0 && actualSystemIndex == targetSystemIndex) return 1f
+
+        val actualDb = curveDb(fineVolumeCurve, actualSystemIndex)
+        val desiredDb = targetDb?.let {
+            val upperDb = curveDb(
+                fineVolumeCurve,
+                (targetSystemIndex + 1).coerceAtMost(fineVolumeMaximumIndex),
+            )
+            if (targetSubstep == 0 || upperDb == null) it
+            else it + (upperDb - it) * targetSubstep / 3f
+        } ?: fallbackTargetDb(targetSystemIndex, targetSubstep)
+        val resolvedActualDb = actualDb ?: fallbackTargetDb(actualSystemIndex, 0)
+        return 10f.pow((desiredDb - resolvedActualDb) / 20f).coerceIn(0f, 1f)
+    }
+
+    private fun fallbackTargetDb(systemIndex: Int, substep: Int): Float {
+        return (systemIndex - fineVolumeMinimumIndex) * FALLBACK_SYSTEM_STEP_DB +
+                FALLBACK_SYSTEM_STEP_DB * substep / 3f
     }
 
     private fun curveDb(curve: List<Float>?, volumeIndex: Int): Float? {
@@ -796,6 +824,7 @@ class PlaybackService : Service() {
 
     private fun invalidateFineVolumeCurve() {
         fineVolumeCurve = null
+        expectedFineVolumeSystemIndex = null
         if (fineGrainedVolumeEnabled) {
             synchronizeFineVolume()
             fineVolumeProvider?.let {
@@ -810,7 +839,10 @@ class PlaybackService : Service() {
         val volumeRangeChanged =
             currentSystemIndex !in fineVolumeMinimumIndex..fineVolumeMaximumIndex
         val currentDeviceType = currentOutputDeviceType()
-        if (volumeRangeChanged || currentDeviceType != fineVolumeDeviceType || fineVolumeCurve == null) {
+        val internallyExpected = expectedFineVolumeSystemIndex
+        val externalVolumeChange = internallyExpected != null &&
+                currentSystemIndex != internallyExpected
+        if (volumeRangeChanged || currentDeviceType != fineVolumeDeviceType || fineVolumeCurve == null || externalVolumeChange) {
             fineVolumeMinimumIndex = streamMinimumVolume()
             fineVolumeMaximumIndex = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             fineVolumeDeviceType = currentDeviceType
@@ -823,6 +855,7 @@ class PlaybackService : Service() {
                 fineVolumeMinimumIndex,
                 fineVolumeMaximumIndex,
             )
+            expectedFineVolumeSystemIndex = fineVolumeSystemIndex
             fineVolumeGain = 1f
         } else if (currentSystemIndex != fineVolumeSystemIndex) {
             fineVolumeSystemIndex = currentSystemIndex
@@ -830,6 +863,7 @@ class PlaybackService : Service() {
                 fineVolumeMinimumIndex,
                 fineVolumeMaximumIndex,
             ) * 3
+            expectedFineVolumeSystemIndex = currentSystemIndex
             fineVolumeGain = 1f
         }
     }
@@ -837,7 +871,7 @@ class PlaybackService : Service() {
     private fun loadFineVolumeCurve(): List<Float>? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
 
-        return (fineVolumeMinimumIndex..fineVolumeMaximumIndex).map { volumeIndex ->
+        val curve = (fineVolumeMinimumIndex..fineVolumeMaximumIndex).map { volumeIndex ->
             runCatching {
                 audioManager.getStreamVolumeDb(
                     AudioManager.STREAM_MUSIC,
@@ -845,12 +879,24 @@ class PlaybackService : Service() {
                     fineVolumeDeviceType,
                 )
             }.getOrNull()
-        }.takeIf { values -> values.all { it != null } }?.map { it ?: 0f }
+        }.takeIf { values -> values.all { it != null && it.isFinite() } }?.map { it ?: 0f }
+        return curve?.takeIf { values ->
+            values.zipWithNext().all { (lowerDb, upperDb) -> upperDb > lowerDb }
+        }
     }
 
     private fun currentOutputDeviceType(): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val mediaAttributes = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                .build()
+            audioManager.getAudioDevicesForAttributes(mediaAttributes)
+                .firstOrNull { it.isSink }
+                ?.let { return it.type }
+        }
         return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull { it.isSink }?.type ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            .firstOrNull { it.isSink }?.type
+            ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
     }
 
     private fun streamMinimumVolume(): Int {
@@ -929,6 +975,7 @@ class PlaybackService : Service() {
         private const val ACTION_PREVIOUS = "com.example.gravimusicplayer.PREVIOUS"
         private const val ACTION_STOP = "com.example.gravimusicplayer.STOP"
         private const val SILENCE_ANALYSIS_TIMEOUT_MS = 500L
+        private const val FALLBACK_SYSTEM_STEP_DB = 3f
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(

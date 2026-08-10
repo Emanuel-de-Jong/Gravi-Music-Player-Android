@@ -34,6 +34,7 @@ import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import com.example.gravimusicplayer.AudioItem
 import com.example.gravimusicplayer.BrowserEntry
 import com.example.gravimusicplayer.BrowserSortMode
+import com.example.gravimusicplayer.DEFAULT_PLAYER_SETTINGS
 import com.example.gravimusicplayer.DefaultStartPlayOrder
 import com.example.gravimusicplayer.GraviQueuePicker
 import com.example.gravimusicplayer.LibraryRepository
@@ -60,6 +61,7 @@ fun GraviMusicPlayerApp() {
     val waveformAnalyzer = remember(context) { WaveformAnalyzer(context) }
     val graviQueuePicker = remember(context) { GraviQueuePicker(context) }
     val preferences = remember(context) { PlayerPreferences(context) }
+    val initialSettings = remember(preferences) { preferences.settings }
     val performanceProfiler = remember(context) { PerformanceProfiler.get(context) }
     val coroutineScope = rememberCoroutineScope()
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.FOLDERS) }
@@ -82,21 +84,23 @@ fun GraviMusicPlayerApp() {
     var playbackService by remember { mutableStateOf<PlaybackService?>(null) }
     var playbackSnapshot by remember { mutableStateOf(PlaybackSnapshot()) }
     var defaultStartPlayOrder by rememberSaveable {
-        mutableStateOf(preferences.defaultStartPlayOrder)
+        mutableStateOf(initialSettings.defaultStartPlayOrder)
     }
-    var savedLoopMode by rememberSaveable { mutableStateOf(preferences.loopMode) }
-    var genreSeparator by rememberSaveable { mutableStateOf(preferences.genreSeparator) }
-    var appliedGenreSeparator by rememberSaveable { mutableStateOf(preferences.genreSeparator) }
-    var showBrowserThumbnails by rememberSaveable { mutableStateOf(preferences.showBrowserThumbnails) }
-    var queueSearchResults by rememberSaveable { mutableStateOf(preferences.queueSearchResults) }
-    var skipSilenceEnabled by rememberSaveable { mutableStateOf(preferences.skipSilenceEnabled) }
+    var savedLoopMode by rememberSaveable { mutableStateOf(initialSettings.loopMode) }
+    var genreSeparator by rememberSaveable { mutableStateOf(initialSettings.genreSeparator) }
+    var appliedGenreSeparator by rememberSaveable { mutableStateOf(initialSettings.genreSeparator) }
+    var showBrowserThumbnails by rememberSaveable {
+        mutableStateOf(initialSettings.showBrowserThumbnails)
+    }
+    var queueSearchResults by rememberSaveable { mutableStateOf(initialSettings.queueSearchResults) }
+    var skipSilenceEnabled by rememberSaveable { mutableStateOf(initialSettings.skipSilenceEnabled) }
     var loudnessNormalizationEnabled by rememberSaveable {
-        mutableStateOf(preferences.loudnessNormalizationEnabled)
+        mutableStateOf(initialSettings.loudnessNormalizationEnabled)
     }
     var fineGrainedVolumeEnabled by rememberSaveable {
-        mutableStateOf(preferences.fineGrainedVolumeEnabled)
+        mutableStateOf(initialSettings.fineGrainedVolumeEnabled)
     }
-    var graviPickerSettings by remember { mutableStateOf(preferences.graviPickerSettings) }
+    var graviPickerSettings by remember { mutableStateOf(initialSettings.graviPickerSettings) }
     var pendingPlaylistExport by remember { mutableStateOf<List<AudioItem>?>(null) }
     var isFolderActionRunning by remember { mutableStateOf(false) }
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
@@ -600,7 +604,9 @@ fun GraviMusicPlayerApp() {
                                 },
                                 onApplyGenreSeparator = {
                                     genreSeparator = it
-                                    appliedGenreSeparator = it.ifBlank { ";" }
+                                    appliedGenreSeparator = it.ifBlank {
+                                        DEFAULT_PLAYER_SETTINGS.genreSeparator
+                                    }
                                     preferences.genreSeparator = it
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++
@@ -634,17 +640,18 @@ fun GraviMusicPlayerApp() {
                                 },
                                 onResetSettings = {
                                     preferences.resetSettingsExceptRootUri()
-                                    defaultStartPlayOrder = preferences.defaultStartPlayOrder
-                                    savedLoopMode = preferences.loopMode
-                                    genreSeparator = preferences.genreSeparator
-                                    appliedGenreSeparator = preferences.genreSeparator
-                                    showBrowserThumbnails = preferences.showBrowserThumbnails
-                                    queueSearchResults = preferences.queueSearchResults
-                                    skipSilenceEnabled = preferences.skipSilenceEnabled
+                                    val settings = preferences.settings
+                                    defaultStartPlayOrder = settings.defaultStartPlayOrder
+                                    savedLoopMode = settings.loopMode
+                                    genreSeparator = settings.genreSeparator
+                                    appliedGenreSeparator = settings.genreSeparator
+                                    showBrowserThumbnails = settings.showBrowserThumbnails
+                                    queueSearchResults = settings.queueSearchResults
+                                    skipSilenceEnabled = settings.skipSilenceEnabled
                                     loudnessNormalizationEnabled =
-                                        preferences.loudnessNormalizationEnabled
-                                    fineGrainedVolumeEnabled = preferences.fineGrainedVolumeEnabled
-                                    graviPickerSettings = preferences.graviPickerSettings
+                                        settings.loudnessNormalizationEnabled
+                                    fineGrainedVolumeEnabled = settings.fineGrainedVolumeEnabled
+                                    graviPickerSettings = settings.graviPickerSettings
                                     playbackService?.setLoopMode(savedLoopMode)
                                     playbackService?.setSkipSilenceEnabled(skipSilenceEnabled)
                                     playbackService?.setLoudnessNormalizationEnabled(

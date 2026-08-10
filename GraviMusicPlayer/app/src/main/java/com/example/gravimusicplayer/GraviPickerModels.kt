@@ -1,14 +1,14 @@
 package com.example.gravimusicplayer
 
 data class GraviPickerSettings(
-    val depth: Int = 2,
-    val parentOdds: Boolean = true,
-    val childOdds: Boolean = true,
-    val evenOddsMinFileCount: Int = 5,
-    val lessLikelyDivisor: Float = 2f,
-    val queueEntries: Int = 100,
-    val edgeCaseFolderDepths: Map<String, Int> = emptyMap(),
-    val blacklistFolders: Set<String> = emptySet(),
+    val depth: Int,
+    val parentOdds: Boolean,
+    val childOdds: Boolean,
+    val evenOddsMinFileCount: Int,
+    val lessLikelyDivisor: Float,
+    val queueEntries: Int,
+    val edgeCaseFolderDepths: Map<String, Int>,
+    val blacklistFolders: Set<String>,
 ) {
     fun sanitized(): GraviPickerSettings {
         return copy(

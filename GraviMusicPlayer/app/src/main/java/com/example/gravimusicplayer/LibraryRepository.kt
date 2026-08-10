@@ -507,7 +507,12 @@ class LibraryRepository(private val context: Context) {
         return runCatching {
             val json = JSONObject(cacheFile.readText())
             if (json.optString("rootUriString") != rootUriString) return emptyList()
-            if (json.optString("genreSeparator", ";") != genreSeparator) return emptyList()
+            if (
+                json.optString(
+                    "genreSeparator",
+                    DEFAULT_PLAYER_SETTINGS.genreSeparator
+                ) != genreSeparator
+            ) return emptyList()
 
             val files = json.optJSONArray("files") ?: JSONArray()
             (0 until files.length()).mapNotNull { index ->
@@ -663,7 +668,7 @@ class LibraryRepository(private val context: Context) {
                 retriever.setDataSource(context, uri)
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE)
                     .orEmpty()
-                    .split(genreSeparator.ifBlank { ";" })
+                    .split(genreSeparator.ifBlank { DEFAULT_PLAYER_SETTINGS.genreSeparator })
                     .map { it.trim() }
                     .filter { isMeaningfulGenreTag(it) }
                     .distinct()
