@@ -47,6 +47,7 @@ fun SettingsScreen(
     queueSearchResults: Boolean,
     skipSilenceEnabled: Boolean,
     loudnessNormalizationEnabled: Boolean,
+    fineGrainedVolumeEnabled: Boolean,
     graviPickerSettings: GraviPickerSettings,
     onChooseFolder: () -> Unit,
     onDefaultStartPlayOrderChanged: (DefaultStartPlayOrder) -> Unit,
@@ -56,6 +57,7 @@ fun SettingsScreen(
     onQueueSearchResultsChanged: (Boolean) -> Unit,
     onSkipSilenceEnabledChanged: (Boolean) -> Unit,
     onLoudnessNormalizationChanged: (Boolean) -> Unit,
+    onFineGrainedVolumeChanged: (Boolean) -> Unit,
     onGraviPickerSettingsChanged: (GraviPickerSettings) -> Unit,
     onResetSettings: () -> Unit,
     onClearCaches: () -> Unit,
@@ -105,6 +107,12 @@ fun SettingsScreen(
             checked = loudnessNormalizationEnabled,
             infoText = "Uses ReplayGain track gain and peak metadata to adjust each song volume while avoiding clipping.",
             onCheckedChanged = onLoudnessNormalizationChanged,
+        )
+        SwitchSettingRow(
+            label = "Fine-grained volume buttons",
+            checked = fineGrainedVolumeEnabled,
+            infoText = "Adds two intermediate volume steps between each Android system-volume step using the active output device's volume curve.",
+            onCheckedChanged = onFineGrainedVolumeChanged,
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -380,6 +388,7 @@ fun SettingsScreenPreview() {
             queueSearchResults = true,
             skipSilenceEnabled = true,
             loudnessNormalizationEnabled = true,
+            fineGrainedVolumeEnabled = true,
             graviPickerSettings = GraviPickerSettings(),
             onChooseFolder = {},
             onDefaultStartPlayOrderChanged = {},
@@ -389,6 +398,7 @@ fun SettingsScreenPreview() {
             onQueueSearchResultsChanged = {},
             onSkipSilenceEnabledChanged = {},
             onLoudnessNormalizationChanged = {},
+            onFineGrainedVolumeChanged = {},
             onGraviPickerSettingsChanged = {},
             onResetSettings = {},
             onClearCaches = {},

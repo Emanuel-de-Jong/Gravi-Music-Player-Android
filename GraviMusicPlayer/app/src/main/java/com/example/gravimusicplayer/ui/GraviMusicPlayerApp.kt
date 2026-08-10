@@ -93,6 +93,9 @@ fun GraviMusicPlayerApp() {
     var loudnessNormalizationEnabled by rememberSaveable {
         mutableStateOf(preferences.loudnessNormalizationEnabled)
     }
+    var fineGrainedVolumeEnabled by rememberSaveable {
+        mutableStateOf(preferences.fineGrainedVolumeEnabled)
+    }
     var graviPickerSettings by remember { mutableStateOf(preferences.graviPickerSettings) }
     var pendingPlaylistExport by remember { mutableStateOf<List<AudioItem>?>(null) }
     var isFolderActionRunning by remember { mutableStateOf(false) }
@@ -164,6 +167,7 @@ fun GraviMusicPlayerApp() {
                 boundService.setLoopMode(savedLoopMode)
                 boundService.setSkipSilenceEnabled(skipSilenceEnabled)
                 boundService.setLoudnessNormalizationEnabled(loudnessNormalizationEnabled)
+                boundService.setFineGrainedVolumeEnabled(fineGrainedVolumeEnabled)
                 playbackSnapshot = boundService.getSnapshot()
                 boundService.setListener { playbackSnapshot = it }
                 pendingPlaybackRequest?.let {
@@ -584,6 +588,7 @@ fun GraviMusicPlayerApp() {
                                 queueSearchResults = queueSearchResults,
                                 skipSilenceEnabled = skipSilenceEnabled,
                                 loudnessNormalizationEnabled = loudnessNormalizationEnabled,
+                                fineGrainedVolumeEnabled = fineGrainedVolumeEnabled,
                                 graviPickerSettings = graviPickerSettings,
                                 onChooseFolder = { folderPicker.launch(null) },
                                 onDefaultStartPlayOrderChanged = {
@@ -618,6 +623,11 @@ fun GraviMusicPlayerApp() {
                                     preferences.loudnessNormalizationEnabled = it
                                     playbackService?.setLoudnessNormalizationEnabled(it)
                                 },
+                                onFineGrainedVolumeChanged = {
+                                    fineGrainedVolumeEnabled = it
+                                    preferences.fineGrainedVolumeEnabled = it
+                                    playbackService?.setFineGrainedVolumeEnabled(it)
+                                },
                                 onGraviPickerSettingsChanged = {
                                     graviPickerSettings = it
                                     preferences.graviPickerSettings = it
@@ -633,11 +643,15 @@ fun GraviMusicPlayerApp() {
                                     skipSilenceEnabled = preferences.skipSilenceEnabled
                                     loudnessNormalizationEnabled =
                                         preferences.loudnessNormalizationEnabled
+                                    fineGrainedVolumeEnabled = preferences.fineGrainedVolumeEnabled
                                     graviPickerSettings = preferences.graviPickerSettings
                                     playbackService?.setLoopMode(savedLoopMode)
                                     playbackService?.setSkipSilenceEnabled(skipSilenceEnabled)
                                     playbackService?.setLoudnessNormalizationEnabled(
                                         loudnessNormalizationEnabled
+                                    )
+                                    playbackService?.setFineGrainedVolumeEnabled(
+                                        fineGrainedVolumeEnabled
                                     )
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++

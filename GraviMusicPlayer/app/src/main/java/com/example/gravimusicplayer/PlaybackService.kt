@@ -28,6 +28,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import androidx.media.VolumeProviderCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -58,6 +59,15 @@ class PlaybackService : Service() {
     private var silenceAnalyzer: SilenceAnalyzer? = null
     private var skipSilenceEnabled = false
     private var loudnessNormalizationEnabled = true
+    private var fineGrainedVolumeEnabled = true
+    private var fineVolumeProvider: VolumeProviderCompat? = null
+    private var fineVolumePosition = 0
+    private var fineVolumeSystemIndex = 0
+    private var fineVolumeMinimumIndex = 0
+    private var fineVolumeMaximumIndex = 0
+    private var fineVolumeDeviceType = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+    private var fineVolumeCurve: List<Float>? = null
+    private var fineVolumeGain = 1f
     private var silenceAnalysisRequest = 0
     private var trimStartPositionMs = 0
     private var trimEndPositionMs: Int? = null
@@ -87,6 +97,7 @@ class PlaybackService : Service() {
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
             connectedBluetoothOutputDeviceIds = currentBluetoothOutputDeviceIds()
+            invalidateFineVolumeCurve()
         }
 
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
@@ -99,6 +110,7 @@ class PlaybackService : Service() {
             if (hadBluetoothOutput && removedBluetoothDeviceIds.isNotEmpty()) {
                 pauseForBluetoothOutputLoss()
             }
+            invalidateFineVolumeCurve()
         }
     }
 
@@ -121,6 +133,7 @@ class PlaybackService : Service() {
             setCallback(mediaSessionCallback)
             isActive = true
         }
+        setFineGrainedVolumeEnabled(true)
         connectedBluetoothOutputDeviceIds = currentBluetoothOutputDeviceIds()
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, handler)
         registerReceiver(
@@ -374,7 +387,34 @@ class PlaybackService : Service() {
 
     fun setLoudnessNormalizationEnabled(enabled: Boolean) {
         loudnessNormalizationEnabled = enabled
-        applyReplayGainVolume(snapshot.currentItem)
+        applyPlayerVolume(snapshot.currentItem)
+    }
+
+    fun setFineGrainedVolumeEnabled(enabled: Boolean) {
+        fineGrainedVolumeEnabled = enabled
+        fineVolumeProvider = null
+        fineVolumeCurve = null
+        fineVolumeGain = 1f
+        if (enabled) {
+            synchronizeFineVolume()
+            fineVolumeProvider = object : VolumeProviderCompat(
+                VOLUME_CONTROL_ABSOLUTE,
+                virtualVolumeMaximum(),
+                fineVolumePosition,
+            ) {
+                override fun onAdjustVolume(direction: Int) {
+                    adjustFineVolume(direction)
+                }
+
+                override fun onSetVolumeTo(volume: Int) {
+                    setFineVolume(volume)
+                }
+            }
+            mediaSession?.setPlaybackToRemote(fineVolumeProvider)
+        } else {
+            mediaSession?.setPlaybackToLocal(AudioManager.STREAM_MUSIC)
+        }
+        applyPlayerVolume(snapshot.currentItem)
     }
 
     private fun playIndex(index: Int) {
@@ -388,7 +428,7 @@ class PlaybackService : Service() {
             currentPlayer.stop()
             currentPlayer.clearMediaItems()
             currentPlayer.setMediaItem(MediaItem.fromUri(playbackItem.uri))
-            applyReplayGainVolume(playbackItem)
+            applyPlayerVolume(playbackItem)
             currentPlayer.prepare()
             silenceAnalysisRequest++
             trimStartPositionMs = 0
@@ -702,10 +742,128 @@ class PlaybackService : Service() {
         }
     }
 
-    private fun applyReplayGainVolume(item: AudioItem?) {
+    private fun applyPlayerVolume(item: AudioItem?) {
         val currentPlayer = player ?: return
-        currentPlayer.volume = replayGainVolume(item)
+        currentPlayer.volume = (replayGainVolume(item) * fineVolumeGain).coerceIn(0f, 1f)
     }
+
+    private fun adjustFineVolume(direction: Int) {
+        if (!fineGrainedVolumeEnabled || direction == 0) return
+
+        synchronizeFineVolume()
+        val nextPosition = (fineVolumePosition + direction).coerceIn(
+            virtualVolumeMinimum(),
+            virtualVolumeMaximum()
+        )
+        setFineVolume(nextPosition)
+    }
+
+    private fun setFineVolume(position: Int) {
+        if (!fineGrainedVolumeEnabled) return
+
+        synchronizeFineVolume()
+        val safePosition = position.coerceIn(virtualVolumeMinimum(), virtualVolumeMaximum())
+        val targetSystemIndex = safePosition / 3
+        val targetSubstep = safePosition % 3
+        val systemIndex = (if (targetSubstep == 0) targetSystemIndex else targetSystemIndex + 1)
+            .coerceIn(fineVolumeMinimumIndex, fineVolumeMaximumIndex)
+        val targetCurve = fineVolumeCurve
+        val targetDb = curveDb(targetCurve, targetSystemIndex)
+        val activeDb = curveDb(targetCurve, systemIndex)
+
+        if (audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) != systemIndex) {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, systemIndex, 0)
+        }
+        fineVolumePosition = safePosition
+        fineVolumeSystemIndex = systemIndex
+        fineVolumeGain = if (targetSubstep == 0 || targetDb == null || activeDb == null) {
+            if (targetSubstep == 0) 1f else ((3 - targetSubstep) / 3f)
+        } else {
+            val lowerDb = curveDb(targetCurve, targetSystemIndex) ?: return
+            val upperDb =
+                curveDb(targetCurve, (targetSystemIndex + 1).coerceAtMost(fineVolumeMaximumIndex))
+                    ?: return
+            val interpolatedDb = lowerDb + (upperDb - lowerDb) * targetSubstep / 3f
+            10f.pow((interpolatedDb - activeDb) / 20f).coerceIn(0f, 1f)
+        }
+        fineVolumeProvider?.setCurrentVolume(fineVolumePosition)
+        applyPlayerVolume(snapshot.currentItem)
+    }
+
+    private fun curveDb(curve: List<Float>?, volumeIndex: Int): Float? {
+        return curve?.getOrNull(volumeIndex - fineVolumeMinimumIndex)
+    }
+
+    private fun invalidateFineVolumeCurve() {
+        fineVolumeCurve = null
+        if (fineGrainedVolumeEnabled) {
+            synchronizeFineVolume()
+            fineVolumeProvider?.let {
+                it.setCurrentVolume(fineVolumePosition)
+            }
+            applyPlayerVolume(snapshot.currentItem)
+        }
+    }
+
+    private fun synchronizeFineVolume() {
+        val currentSystemIndex = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val volumeRangeChanged =
+            currentSystemIndex !in fineVolumeMinimumIndex..fineVolumeMaximumIndex
+        val currentDeviceType = currentOutputDeviceType()
+        if (volumeRangeChanged || currentDeviceType != fineVolumeDeviceType || fineVolumeCurve == null) {
+            fineVolumeMinimumIndex = streamMinimumVolume()
+            fineVolumeMaximumIndex = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            fineVolumeDeviceType = currentDeviceType
+            fineVolumeCurve = loadFineVolumeCurve()
+            fineVolumePosition = currentSystemIndex.coerceIn(
+                fineVolumeMinimumIndex,
+                fineVolumeMaximumIndex,
+            ) * 3
+            fineVolumeSystemIndex = currentSystemIndex.coerceIn(
+                fineVolumeMinimumIndex,
+                fineVolumeMaximumIndex,
+            )
+            fineVolumeGain = 1f
+        } else if (currentSystemIndex != fineVolumeSystemIndex) {
+            fineVolumeSystemIndex = currentSystemIndex
+            fineVolumePosition = currentSystemIndex.coerceIn(
+                fineVolumeMinimumIndex,
+                fineVolumeMaximumIndex,
+            ) * 3
+            fineVolumeGain = 1f
+        }
+    }
+
+    private fun loadFineVolumeCurve(): List<Float>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+
+        return (fineVolumeMinimumIndex..fineVolumeMaximumIndex).map { volumeIndex ->
+            runCatching {
+                audioManager.getStreamVolumeDb(
+                    AudioManager.STREAM_MUSIC,
+                    volumeIndex,
+                    fineVolumeDeviceType,
+                )
+            }.getOrNull()
+        }.takeIf { values -> values.all { it != null } }?.map { it ?: 0f }
+    }
+
+    private fun currentOutputDeviceType(): Int {
+        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .firstOrNull { it.isSink }?.type ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+    }
+
+    private fun streamMinimumVolume(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC)
+        } else {
+            0
+        }
+    }
+
+    private fun virtualVolumeMinimum(): Int = fineVolumeMinimumIndex * 3
+
+    private fun virtualVolumeMaximum(): Int = fineVolumeMaximumIndex * 3
 
     private fun replayGainVolume(item: AudioItem?): Float {
         if (!loudnessNormalizationEnabled) return 1f
