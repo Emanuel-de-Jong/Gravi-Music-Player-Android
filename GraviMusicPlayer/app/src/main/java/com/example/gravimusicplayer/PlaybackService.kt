@@ -61,12 +61,9 @@ class PlaybackService : Service() {
     private var loudnessNormalizationEnabled = true
     private var fineGrainedVolumeEnabled = true
     private var fineVolumeProvider: VolumeProviderCompat? = null
-    private var fineVolumePosition = 0
-    private var fineVolumeMinimumIndex = 0
-    private var fineVolumeMaximumIndex = 0
+    private var fineVolumePosition = FINE_VOLUME_MAXIMUM_POSITION
     private var fineVolumeBaselineIndex = 0
-    private var fineVolumeDeviceType = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-    private var fineVolumeCurve: List<Float>? = null
+    private var fineVolumeInitialized = false
     private var fineVolumeGain = 1f
     private var silenceAnalysisRequest = 0
     private var trimStartPositionMs = 0
@@ -393,7 +390,8 @@ class PlaybackService : Service() {
     fun setFineGrainedVolumeEnabled(enabled: Boolean) {
         fineGrainedVolumeEnabled = enabled
         fineVolumeProvider = null
-        fineVolumeCurve = null
+        fineVolumeInitialized = false
+        fineVolumePosition = FINE_VOLUME_MAXIMUM_POSITION
         fineVolumeGain = 1f
         if (enabled) {
             synchronizeFineVolume()
@@ -760,57 +758,18 @@ class PlaybackService : Service() {
 
         synchronizeFineVolume()
         val safePosition = position.coerceIn(virtualVolumeMinimum(), virtualVolumeMaximum())
-        val targetSystemIndex = safePosition / 3
-        val targetSubstep = safePosition % 3
-        val targetDb = curveDb(fineVolumeCurve, targetSystemIndex)
-        val actualSystemIndex = fineVolumeBaselineIndex.coerceIn(
-            fineVolumeMinimumIndex,
-            fineVolumeMaximumIndex,
-        )
-        val nextFineGain = fineVolumeGainFor(
-            targetSystemIndex = targetSystemIndex,
-            targetSubstep = targetSubstep,
-            targetDb = targetDb,
-            actualSystemIndex = actualSystemIndex,
-        )
         fineVolumePosition = safePosition
-        fineVolumeGain = nextFineGain
+        fineVolumeGain = fineVolumeGainFor(safePosition)
         fineVolumeProvider?.setCurrentVolume(fineVolumePosition)
         applyPlayerVolume(snapshot.currentItem)
     }
 
-    private fun fineVolumeGainFor(
-        targetSystemIndex: Int,
-        targetSubstep: Int,
-        targetDb: Float?,
-        actualSystemIndex: Int,
-    ): Float {
-        if (targetSubstep == 0 && actualSystemIndex == targetSystemIndex) return 1f
-
-        val actualDb = curveDb(fineVolumeCurve, actualSystemIndex)
-        val desiredDb = targetDb?.let {
-            val upperDb = curveDb(
-                fineVolumeCurve,
-                (targetSystemIndex + 1).coerceAtMost(fineVolumeMaximumIndex),
-            )
-            if (targetSubstep == 0 || upperDb == null) it
-            else it + (upperDb - it) * targetSubstep / 3f
-        } ?: fallbackTargetDb(targetSystemIndex, targetSubstep)
-        val resolvedActualDb = actualDb ?: fallbackTargetDb(actualSystemIndex, 0)
-        return 10f.pow((desiredDb - resolvedActualDb) / 20f).coerceIn(0f, 1f)
-    }
-
-    private fun fallbackTargetDb(systemIndex: Int, substep: Int): Float {
-        return (systemIndex - fineVolumeMinimumIndex) * FALLBACK_SYSTEM_STEP_DB +
-                FALLBACK_SYSTEM_STEP_DB * substep / 3f
-    }
-
-    private fun curveDb(curve: List<Float>?, volumeIndex: Int): Float? {
-        return curve?.getOrNull(volumeIndex - fineVolumeMinimumIndex)
+    private fun fineVolumeGainFor(position: Int): Float {
+        val attenuationDb = (position - virtualVolumeMaximum()) * FINE_VOLUME_STEP_DB
+        return 10f.pow(attenuationDb / 20f).coerceIn(0f, 1f)
     }
 
     private fun invalidateFineVolumeCurve() {
-        fineVolumeCurve = null
         if (fineGrainedVolumeEnabled) {
             synchronizeFineVolume()
             fineVolumeProvider?.let {
@@ -821,67 +780,17 @@ class PlaybackService : Service() {
     }
 
     private fun synchronizeFineVolume() {
-        val currentSystemIndex = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val currentDeviceType = currentOutputDeviceType()
-        if (fineVolumeCurve == null) {
-            fineVolumeMinimumIndex = streamMinimumVolume()
-            fineVolumeMaximumIndex = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            fineVolumeBaselineIndex = currentSystemIndex.coerceIn(
-                fineVolumeMinimumIndex,
-                fineVolumeMaximumIndex,
-            )
-            fineVolumeDeviceType = currentDeviceType
-            fineVolumeCurve = loadFineVolumeCurve()
-            fineVolumePosition = fineVolumeBaselineIndex * 3
+        if (!fineVolumeInitialized) {
+            fineVolumeBaselineIndex = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            fineVolumePosition = virtualVolumeMaximum()
             fineVolumeGain = 1f
-        } else if (currentDeviceType != fineVolumeDeviceType) {
-            fineVolumeDeviceType = currentDeviceType
-            fineVolumeCurve = loadFineVolumeCurve()
+            fineVolumeInitialized = true
         }
     }
 
-    private fun loadFineVolumeCurve(): List<Float>? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+    private fun virtualVolumeMinimum(): Int = 0
 
-        val curve = (fineVolumeMinimumIndex..fineVolumeMaximumIndex).map { volumeIndex ->
-            runCatching {
-                audioManager.getStreamVolumeDb(
-                    AudioManager.STREAM_MUSIC,
-                    volumeIndex,
-                    fineVolumeDeviceType,
-                )
-            }.getOrNull()
-        }.takeIf { values -> values.all { it != null && it.isFinite() } }?.map { it ?: 0f }
-        return curve?.takeIf { values ->
-            values.zipWithNext().all { (lowerDb, upperDb) -> upperDb > lowerDb }
-        }
-    }
-
-    private fun currentOutputDeviceType(): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val mediaAttributes = android.media.AudioAttributes.Builder()
-                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                .build()
-            audioManager.getAudioDevicesForAttributes(mediaAttributes)
-                .firstOrNull { it.isSink }
-                ?.let { return it.type }
-        }
-        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
-            .firstOrNull { it.isSink }?.type
-            ?: AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
-    }
-
-    private fun streamMinimumVolume(): Int {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            audioManager.getStreamMinVolume(AudioManager.STREAM_MUSIC)
-        } else {
-            0
-        }
-    }
-
-    private fun virtualVolumeMinimum(): Int = fineVolumeMinimumIndex * 3
-
-    private fun virtualVolumeMaximum(): Int = fineVolumeBaselineIndex * 3
+    private fun virtualVolumeMaximum(): Int = FINE_VOLUME_MAXIMUM_POSITION
 
     private fun replayGainVolume(item: AudioItem?): Float {
         if (!loudnessNormalizationEnabled) return 1f
@@ -947,7 +856,8 @@ class PlaybackService : Service() {
         private const val ACTION_PREVIOUS = "com.example.gravimusicplayer.PREVIOUS"
         private const val ACTION_STOP = "com.example.gravimusicplayer.STOP"
         private const val SILENCE_ANALYSIS_TIMEOUT_MS = 500L
-        private const val FALLBACK_SYSTEM_STEP_DB = 3f
+        private const val FINE_VOLUME_MAXIMUM_POSITION = 36
+        private const val FINE_VOLUME_STEP_DB = 1.5f
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(
