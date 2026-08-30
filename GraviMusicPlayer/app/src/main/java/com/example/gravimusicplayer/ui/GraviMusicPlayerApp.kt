@@ -109,6 +109,7 @@ fun GraviMusicPlayerApp() {
     var isPerformanceExporting by remember { mutableStateOf(false) }
     var favoriteSyncEnabled by remember { mutableStateOf(false) }
     var favoriteKeys by remember { mutableStateOf(emptySet<String>()) }
+    var cachedLibraryItems by remember { mutableStateOf(emptyList<AudioItem>()) }
     var favoritesRefreshRequest by remember { mutableIntStateOf(0) }
 
     val folderPicker =
@@ -238,14 +239,16 @@ fun GraviMusicPlayerApp() {
             favoriteSyncEnabled = false
             favoriteKeys = emptySet()
         } else {
-            val state = withContext(Dispatchers.IO) {
-                val allItems = libraryRepository.loadRecursiveAudioItems(rootUri, emptyList())
-                favoritesRepository.refreshAndroidEventPaths(
+            val (allItems, state) = withContext(Dispatchers.IO) {
+                val items = libraryRepository.loadRecursiveAudioItems(rootUri, emptyList())
+                val favState = favoritesRepository.refreshAndroidEventPaths(
                     rootUri,
-                    allItems,
-                    favoritesDeviceId
+                    items,
+                    favoritesDeviceId,
                 )
+                items to favState
             }
+            cachedLibraryItems = allItems
             favoriteSyncEnabled = state.isEnabled
             favoriteKeys = state.favoriteKeys
         }
@@ -327,6 +330,7 @@ fun GraviMusicPlayerApp() {
                                     favoritesRepository.toggleFavorite(
                                         rootUri,
                                         currentItem,
+                                        cachedLibraryItems,
                                         favoritesDeviceId,
                                     )
                                 }

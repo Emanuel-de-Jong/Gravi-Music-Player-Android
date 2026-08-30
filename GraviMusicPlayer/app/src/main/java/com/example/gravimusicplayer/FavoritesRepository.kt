@@ -11,6 +11,10 @@ import java.util.TimeZone
 
 class FavoritesRepository(private val context: Context) {
     fun loadSyncState(rootUriString: String): FavoriteSyncState {
+        return loadSyncState(rootUriString, emptyList())
+    }
+
+    private fun loadSyncState(rootUriString: String, items: List<AudioItem>): FavoriteSyncState {
         val syncFolder = syncFolder(rootUriString) ?: return FavoriteSyncState()
         if (!hasSchemaFile(syncFolder)) return FavoriteSyncState()
 
@@ -18,12 +22,13 @@ class FavoritesRepository(private val context: Context) {
         val desktopDocument = readFavoritesDocument(syncFolder, DESKTOP_FAVORITES_FILE)
         val androidEvents = androidDocument?.events ?: emptyList()
         val desktopEvents = desktopDocument?.events ?: emptyList()
-        return FavoriteSyncState(
+        val state = FavoriteSyncState(
             isEnabled = true,
             favoriteKeys = mergeFavoriteKeys(androidEvents + desktopEvents),
             androidEvents = androidEvents,
             desktopEvents = desktopEvents,
         )
+        return state.withResolvedFavoriteKeys(items)
     }
 
     fun refreshAndroidEventPaths(
@@ -37,7 +42,8 @@ class FavoritesRepository(private val context: Context) {
         ensureAndroidFavoritesFile(syncFolder, deviceId)
         val document =
             readFavoritesDocument(syncFolder, ANDROID_FAVORITES_FILE) ?: return loadSyncState(
-                rootUriString
+                rootUriString,
+                items,
             )
         val pathsByIsrc = items
             .mapNotNull { item -> item.isrc.normalizedIsrc()?.let { it to item.favoritePath() } }
@@ -54,24 +60,25 @@ class FavoritesRepository(private val context: Context) {
         if (hasChanged) {
             writeAndroidDocument(syncFolder, document.copy(events = updatedEvents), deviceId)
         }
-        return loadSyncState(rootUriString).withResolvedFavoriteKeys(items)
+        return loadSyncState(rootUriString, items)
     }
 
     fun toggleFavorite(
         rootUriString: String,
         item: AudioItem,
+        items: List<AudioItem>,
         deviceId: String
     ): FavoriteSyncState {
-        val state = loadSyncState(rootUriString)
+        val state = loadSyncState(rootUriString, items)
         if (!state.isEnabled) return state
 
         val eventType =
-            if (state.favoriteKeys.any { favoriteKey -> favoriteKey.matchesFavoriteItem(item) }) {
+            if (item.favoriteKey() in state.favoriteKeys) {
                 FavoriteEventType.REMOVED
             } else {
                 FavoriteEventType.ADDED
             }
-        return appendAndroidEvent(rootUriString, item, eventType, deviceId)
+        return appendAndroidEvent(rootUriString, item, eventType, deviceId, items)
     }
 
     fun addFavorite(rootUriString: String, item: AudioItem, deviceId: String): FavoriteSyncState {
@@ -91,6 +98,7 @@ class FavoritesRepository(private val context: Context) {
         item: AudioItem,
         type: FavoriteEventType,
         deviceId: String,
+        items: List<AudioItem> = emptyList(),
     ): FavoriteSyncState {
         val syncFolder = syncFolder(rootUriString) ?: return FavoriteSyncState()
         if (!hasSchemaFile(syncFolder)) return FavoriteSyncState()
@@ -113,7 +121,7 @@ class FavoritesRepository(private val context: Context) {
             events = (androidDocument?.events ?: emptyList()) + event,
         )
         writeAndroidDocument(syncFolder, updatedDocument, deviceId)
-        return loadSyncState(rootUriString)
+        return loadSyncState(rootUriString, items)
     }
 
     private fun syncFolder(rootUriString: String): DocumentFile? {
@@ -227,7 +235,7 @@ class FavoritesRepository(private val context: Context) {
 
             itemsByIsrcKey[favoriteKey]?.let { return@map it }
 
-            val favoritePath = favoriteKey.favoritePathKeyPath() ?: return@map favoriteKey
+            val favoritePath = favoriteKey.favoritePathKeyPath()
             val matchingItems = items.filter { item ->
                 item.favoritePathKey().favoritePathKeyPath()?.let { itemPath ->
                     itemPath == favoritePath || itemPath.endsWith("/$favoritePath") || favoritePath.endsWith(
@@ -240,21 +248,8 @@ class FavoritesRepository(private val context: Context) {
         return copy(favoriteKeys = resolvedKeys)
     }
 
-    private fun String.matchesFavoriteItem(item: AudioItem): Boolean {
-        if (this == item.favoriteKey()) return true
-        item.isrc.favoriteIsrcKey()?.let { itemIsrcKey ->
-            if (this == itemIsrcKey) return true
-        }
-
-        val favoritePath = favoritePathKeyPath() ?: return false
-        val itemPath = item.favoritePathKey().favoritePathKeyPath() ?: return false
-        return itemPath == favoritePath || itemPath.endsWith("/$favoritePath") || favoritePath.endsWith(
-            "/$itemPath"
-        )
-    }
-
-    private fun String.favoritePathKeyPath(): String? {
-        return removePrefix("path:").takeIf { it != this }
+    private fun String.favoritePathKeyPath(): String {
+        return removePrefix("path:").normalizedFavoritePath().lowercase()
     }
 
     private fun FavoriteEvent.favoriteKey(): String {
