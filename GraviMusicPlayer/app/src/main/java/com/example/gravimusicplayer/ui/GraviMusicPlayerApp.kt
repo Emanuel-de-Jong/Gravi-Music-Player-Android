@@ -107,6 +107,7 @@ fun GraviMusicPlayerApp() {
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
     var pendingPerformanceExport by remember { mutableStateOf<String?>(null) }
     var isPerformanceExporting by remember { mutableStateOf(false) }
+    var favoriteSyncEnabled by remember { mutableStateOf(false) }
     var favoriteKeys by remember { mutableStateOf(emptySet<String>()) }
     var favoritesRefreshRequest by remember { mutableIntStateOf(0) }
 
@@ -233,18 +234,20 @@ fun GraviMusicPlayerApp() {
 
     LaunchedEffect(rootUriString, libraryCacheVersion, favoritesRefreshRequest) {
         val rootUri = rootUriString
-        favoriteKeys = if (rootUri == null) {
-            emptySet()
+        if (rootUri == null) {
+            favoriteSyncEnabled = false
+            favoriteKeys = emptySet()
         } else {
-            withContext(Dispatchers.IO) {
-                favoritesRepository.initialize(rootUri, favoritesDeviceId)
+            val state = withContext(Dispatchers.IO) {
                 val allItems = libraryRepository.loadRecursiveAudioItems(rootUri, emptyList())
                 favoritesRepository.refreshAndroidEventPaths(
                     rootUri,
                     allItems,
                     favoritesDeviceId
-                ).favoriteKeys
+                )
             }
+            favoriteSyncEnabled = state.isEnabled
+            favoriteKeys = state.favoriteKeys
         }
     }
 
@@ -318,22 +321,26 @@ fun GraviMusicPlayerApp() {
                     onToggleCurrentFavorite = {
                         val rootUri = rootUriString
                         val currentItem = playbackSnapshot.currentItem
-                        if (rootUri != null && currentItem != null) {
+                        if (favoriteSyncEnabled && rootUri != null && currentItem != null) {
                             coroutineScope.launch {
-                                val updatedFavoriteKeys = withContext(Dispatchers.IO) {
+                                val updatedFavoriteState = withContext(Dispatchers.IO) {
                                     favoritesRepository.toggleFavorite(
                                         rootUri,
                                         currentItem,
                                         favoritesDeviceId,
-                                    ).favoriteKeys
+                                    )
                                 }
-                                favoriteKeys = updatedFavoriteKeys
+                                favoriteSyncEnabled = updatedFavoriteState.isEnabled
+                                favoriteKeys = updatedFavoriteState.favoriteKeys
                             }
                         }
                     },
                     onToggleFavoriteQueueFilter = {
-                        playbackService?.toggleFavoriteQueueFilter(favoriteKeys)
+                        if (favoriteSyncEnabled) playbackService?.toggleFavoriteQueueFilter(
+                            favoriteKeys
+                        )
                     },
+                    favoritesEnabled = favoriteSyncEnabled,
                     showThumbnails = showBrowserThumbnails,
                     onLoopModeChanged = {
                         savedLoopMode = it

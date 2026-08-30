@@ -124,6 +124,7 @@ fun PlayScreen(
     onShuffleQueue: () -> Unit,
     onToggleCurrentFavorite: () -> Unit,
     onToggleFavoriteQueueFilter: () -> Unit,
+    favoritesEnabled: Boolean,
     showThumbnails: Boolean,
     onLoopModeChanged: (LoopMode) -> Unit,
 ) {
@@ -163,7 +164,7 @@ fun PlayScreen(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        IconButton(onClick = onToggleCurrentFavorite, enabled = item != null) {
+        IconButton(onClick = onToggleCurrentFavorite, enabled = favoritesEnabled && item != null) {
             Icon(
                 if (item?.isFavorite == true) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                 contentDescription = if (item?.isFavorite == true) "Remove favorite" else "Add favorite",
@@ -214,6 +215,7 @@ fun PlayScreen(
         }
         PlaybackModeRow(
             snapshot = snapshot,
+            favoritesEnabled = favoritesEnabled,
             onShuffleQueue = onShuffleQueue,
             onToggleFavoriteQueueFilter = onToggleFavoriteQueueFilter,
             onLoopModeChanged = onLoopModeChanged,
@@ -312,6 +314,7 @@ private fun ArtworkImage(artworkUriString: String?, modifier: Modifier = Modifie
 @Composable
 private fun PlaybackModeRow(
     snapshot: PlaybackSnapshot,
+    favoritesEnabled: Boolean,
     onShuffleQueue: () -> Unit,
     onToggleFavoriteQueueFilter: () -> Unit,
     onLoopModeChanged: (LoopMode) -> Unit,
@@ -325,7 +328,8 @@ private fun PlaybackModeRow(
             onShuffleQueue = onShuffleQueue,
         )
         FavoriteQueueFilterButton(
-            enabled = snapshot.queue.any { it.isFavorite } || snapshot.isFavoriteQueueFilterEnabled,
+            enabled = favoritesEnabled &&
+                    (snapshot.queue.any { it.isFavorite } || snapshot.isFavoriteQueueFilterEnabled),
             active = snapshot.isFavoriteQueueFilterEnabled,
             onToggleFavoriteQueueFilter = onToggleFavoriteQueueFilter,
         )
@@ -565,6 +569,7 @@ fun PlayScreenPreview() {
             onShuffleQueue = {},
             onToggleCurrentFavorite = {},
             onToggleFavoriteQueueFilter = {},
+            favoritesEnabled = true,
             showThumbnails = false,
             onLoopModeChanged = {},
         )

@@ -24,6 +24,7 @@ data class FavoritesDocument(
 )
 
 data class FavoriteSyncState(
+    val isEnabled: Boolean = false,
     val favoriteKeys: Set<String> = emptySet(),
     val androidEvents: List<FavoriteEvent> = emptyList(),
     val desktopEvents: List<FavoriteEvent> = emptyList(),

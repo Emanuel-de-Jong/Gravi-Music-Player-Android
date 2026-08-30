@@ -10,20 +10,16 @@ import java.util.Locale
 import java.util.TimeZone
 
 class FavoritesRepository(private val context: Context) {
-    fun initialize(rootUriString: String, deviceId: String) {
-        val syncFolder = syncFolder(rootUriString, createMissing = true) ?: return
-        ensureSchemaFile(syncFolder)
-        ensureAndroidFavoritesFile(syncFolder, deviceId)
-    }
-
     fun loadSyncState(rootUriString: String): FavoriteSyncState {
-        val syncFolder =
-            syncFolder(rootUriString, createMissing = false) ?: return FavoriteSyncState()
+        val syncFolder = syncFolder(rootUriString) ?: return FavoriteSyncState()
+        if (!hasSchemaFile(syncFolder)) return FavoriteSyncState()
+
         val androidDocument = readFavoritesDocument(syncFolder, ANDROID_FAVORITES_FILE)
         val desktopDocument = readFavoritesDocument(syncFolder, DESKTOP_FAVORITES_FILE)
         val androidEvents = androidDocument?.events ?: emptyList()
         val desktopEvents = desktopDocument?.events ?: emptyList()
         return FavoriteSyncState(
+            isEnabled = true,
             favoriteKeys = mergeFavoriteKeys(androidEvents + desktopEvents),
             androidEvents = androidEvents,
             desktopEvents = desktopEvents,
@@ -35,9 +31,9 @@ class FavoritesRepository(private val context: Context) {
         items: List<AudioItem>,
         deviceId: String,
     ): FavoriteSyncState {
-        val syncFolder =
-            syncFolder(rootUriString, createMissing = true) ?: return loadSyncState(rootUriString)
-        ensureSchemaFile(syncFolder)
+        val syncFolder = syncFolder(rootUriString) ?: return FavoriteSyncState()
+        if (!hasSchemaFile(syncFolder)) return FavoriteSyncState()
+
         ensureAndroidFavoritesFile(syncFolder, deviceId)
         val document =
             readFavoritesDocument(syncFolder, ANDROID_FAVORITES_FILE) ?: return loadSyncState(
@@ -67,6 +63,8 @@ class FavoritesRepository(private val context: Context) {
         deviceId: String
     ): FavoriteSyncState {
         val state = loadSyncState(rootUriString)
+        if (!state.isEnabled) return state
+
         val eventType = if (item.favoriteKey() in state.favoriteKeys) {
             FavoriteEventType.REMOVED
         } else {
@@ -93,9 +91,9 @@ class FavoritesRepository(private val context: Context) {
         type: FavoriteEventType,
         deviceId: String,
     ): FavoriteSyncState {
-        val syncFolder =
-            syncFolder(rootUriString, createMissing = true) ?: return loadSyncState(rootUriString)
-        ensureSchemaFile(syncFolder)
+        val syncFolder = syncFolder(rootUriString) ?: return FavoriteSyncState()
+        if (!hasSchemaFile(syncFolder)) return FavoriteSyncState()
+
         ensureAndroidFavoritesFile(syncFolder, deviceId)
         val currentTimestamp = currentTimestamp()
         val androidDocument = readFavoritesDocument(syncFolder, ANDROID_FAVORITES_FILE)
@@ -117,26 +115,14 @@ class FavoritesRepository(private val context: Context) {
         return loadSyncState(rootUriString)
     }
 
-    private fun syncFolder(rootUriString: String, createMissing: Boolean): DocumentFile? {
+    private fun syncFolder(rootUriString: String): DocumentFile? {
         val root = DocumentFile.fromTreeUri(context, rootUriString.toUri()) ?: return null
-        val existingToolsFolder = root.findFile(TOOLS_FOLDER)?.takeIf { it.isDirectory }
-        val toolsFolder = existingToolsFolder ?: if (createMissing) {
-            root.createDirectory(TOOLS_FOLDER)
-        } else {
-            null
-        } ?: return null
-        val existingSyncFolder = toolsFolder.findFile(SYNC_FOLDER)?.takeIf { it.isDirectory }
-        return existingSyncFolder ?: if (createMissing) {
-            toolsFolder.createDirectory(SYNC_FOLDER)
-        } else {
-            null
-        }
+        val toolsFolder = root.findFile(TOOLS_FOLDER)?.takeIf { it.isDirectory } ?: return null
+        return toolsFolder.findFile(SYNC_FOLDER)?.takeIf { it.isDirectory }
     }
 
-    private fun ensureSchemaFile(syncFolder: DocumentFile) {
-        if (syncFolder.findFile(SCHEMA_FILE) != null) return
-
-        writeText(syncFolder, SCHEMA_FILE, defaultSchemaJson().toString(2))
+    private fun hasSchemaFile(syncFolder: DocumentFile): Boolean {
+        return syncFolder.findFile(SCHEMA_FILE)?.isFile == true
     }
 
     private fun ensureAndroidFavoritesFile(syncFolder: DocumentFile, deviceId: String) {
@@ -258,75 +244,6 @@ class FavoritesRepository(private val context: Context) {
             .put("deviceId", document.deviceId)
             .put("updatedAt", document.updatedAt)
             .put("events", eventsJson)
-    }
-
-    private fun defaultSchemaJson(): JSONObject {
-        return JSONObject()
-            .put("\$schema", "https://json-schema.org/draft/2020-12/schema")
-            .put("\$id", "https://gravi-music-player.local/schemas/favorites-events-v2.schema.json")
-            .put("title", "Gravi Music Player Favorites Events")
-            .put("type", "object")
-            .put("required", JSONArray(listOf("format", "app", "deviceId", "updatedAt", "events")))
-            .put(
-                "properties",
-                JSONObject()
-                    .put("format", JSONObject().put("const", FAVORITES_FORMAT))
-                    .put(
-                        "app",
-                        JSONObject().put("type", "string")
-                            .put("enum", JSONArray(listOf("android", "desktop")))
-                    )
-                    .put("deviceId", JSONObject().put("type", "string"))
-                    .put("updatedAt", JSONObject().put("type", "string").put("format", "date-time"))
-                    .put(
-                        "events",
-                        JSONObject()
-                            .put("type", "array")
-                            .put(
-                                "items",
-                                JSONObject()
-                                    .put("type", "object")
-                                    .put(
-                                        "required",
-                                        JSONArray(
-                                            listOf(
-                                                "type",
-                                                "path",
-                                                "isrc",
-                                                "timestamp",
-                                                "deviceId"
-                                            )
-                                        )
-                                    )
-                                    .put(
-                                        "properties",
-                                        JSONObject()
-                                            .put(
-                                                "type",
-                                                JSONObject().put("type", "string").put(
-                                                    "enum",
-                                                    JSONArray(
-                                                        listOf(
-                                                            "favorite_added",
-                                                            "favorite_removed"
-                                                        )
-                                                    )
-                                                )
-                                            )
-                                            .put("path", JSONObject().put("type", "string"))
-                                            .put("isrc", JSONObject().put("type", "string"))
-                                            .put(
-                                                "timestamp",
-                                                JSONObject().put("type", "string")
-                                                    .put("format", "date-time")
-                                            )
-                                            .put("deviceId", JSONObject().put("type", "string"))
-                                    )
-                                    .put("additionalProperties", false)
-                            )
-                    )
-            )
-            .put("additionalProperties", false)
     }
 
     private fun currentTimestamp(): String {
