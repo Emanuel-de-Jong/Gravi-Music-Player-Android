@@ -9,6 +9,7 @@ import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import kotlin.math.ceil
 import kotlin.math.roundToLong
 
 class PerformanceProfiler private constructor(context: Context) {
@@ -133,13 +134,13 @@ class PerformanceProfiler private constructor(context: Context) {
 
     private fun buildReport(): String {
         val database = databaseHelper.readableDatabase
-        val summary = JSONArray()
+        val summaryRaw = JSONArray()
         database.rawQuery(
-            "SELECT label, COUNT(*), SUM(durationMs), AVG(durationMs), MIN(durationMs), MAX(durationMs), MAX(recordedAtMs) FROM measurements GROUP BY label ORDER BY label",
+            "SELECT label, COUNT(*), SUM(durationMs), AVG(durationMs), MIN(durationMs), MAX(durationMs), MAX(recordedAtMs) FROM measurements GROUP BY label ORDER BY AVG(durationMs)",
             null,
         ).use { cursor ->
             while (cursor.moveToNext()) {
-                summary.put(
+                summaryRaw.put(
                     JSONObject()
                         .put("label", cursor.getString(0))
                         .put("count", cursor.getLong(1))
@@ -152,32 +153,163 @@ class PerformanceProfiler private constructor(context: Context) {
             }
         }
         val measurements = JSONArray()
+        val durationsByLabel = mutableMapOf<String, MutableList<Long>>()
         database.rawQuery(
             "SELECT label, durationMs, recordedAtMs FROM measurements ORDER BY recordedAtMs",
             null,
         ).use { cursor ->
             while (cursor.moveToNext()) {
+                val label = cursor.getString(0)
+                val durationMs = cursor.getLong(1)
+                durationsByLabel.getOrPut(label) { mutableListOf() }.add(durationMs)
                 measurements.put(
                     JSONObject()
-                        .put("label", cursor.getString(0))
-                        .put("durationMs", cursor.getLong(1))
+                        .put("label", label)
+                        .put("durationMs", durationMs)
                         .put("recordedAtMs", cursor.getLong(2))
                 )
             }
         }
+        val summaryNoOutliers = buildSummaryNoOutliers(durationsByLabel)
         val droppedMeasurementCount = synchronized(pendingMeasurementsLock) { droppedMeasurements }
         return JSONObject()
-            .put("formatVersion", 1)
+            .put("formatVersion", 2)
             .put("generatedAtMs", System.currentTimeMillis())
             .put("droppedMeasurementCount", droppedMeasurementCount)
-            .put("summary", summary)
+            .put("summaryNoOutliers", summaryNoOutliers)
+            .put("summaryRaw", summaryRaw)
             .put("measurements", measurements)
             .toString(2)
+    }
+
+    private fun buildSummaryNoOutliers(durationsByLabel: Map<String, List<Long>>): JSONArray {
+        val entries = durationsByLabel.map { (label, durationsMs) ->
+            val filteredDurationsMs = filterOutliers(durationsMs)
+            SummaryEntry(
+                label,
+                filteredDurationsMs.size.toLong(),
+                filteredDurationsMs.sum(),
+                filteredDurationsMs.average(),
+                filteredDurationsMs.minOrNull() ?: 0L,
+                filteredDurationsMs.maxOrNull() ?: 0L,
+                durationsMs.size - filteredDurationsMs.size,
+                (durationsMs.size - filteredDurationsMs.size).toDouble() / durationsMs.size * 100,
+            )
+        }.sortedBy { it.averageDurationMs }
+
+        val summary = JSONArray()
+        entries.forEach { entry ->
+            summary.put(
+                JSONObject()
+                    .put("label", entry.label)
+                    .put("count", entry.count)
+                    .put("totalDurationMs", entry.totalDurationMs)
+                    .put("averageDurationMs", entry.averageDurationMs)
+                    .put("minDurationMs", entry.minDurationMs)
+                    .put("maxDurationMs", entry.maxDurationMs)
+                    .put("filteredMeasurementCount", entry.filteredMeasurementCount)
+                    .put("filteredMeasurementPercent", entry.filteredMeasurementPercent)
+            )
+        }
+        return summary
+    }
+
+    private fun filterOutliers(durationsMs: List<Long>): List<Long> {
+        if (durationsMs.size >= OUTLIER_PERCENTILE_MIN_MEASUREMENTS) {
+            return trimPercentiles(durationsMs, OUTLIER_TRIM_RATIO)
+        }
+
+        return trimSmallSampleOutliers(durationsMs)
+    }
+
+    private fun trimPercentiles(durationsMs: List<Long>, trimRatio: Double): List<Long> {
+        val sortedDurationsMs = durationsMs.sorted()
+        val trimCount = maxOf(1, ceil(sortedDurationsMs.size * trimRatio).toInt())
+        val trimmedDurationsMs = sortedDurationsMs.drop(trimCount).dropLast(trimCount)
+        return trimmedDurationsMs.ifEmpty { sortedDurationsMs }
+    }
+
+    private fun trimSmallSampleOutliers(durationsMs: List<Long>): List<Long> {
+        if (durationsMs.size < 4) return durationsMs
+
+        val sortedDurationsMs = durationsMs.sorted()
+        val gaps = sortedDurationsMs.zipWithNext { firstDurationMs, secondDurationMs ->
+            secondDurationMs - firstDurationMs
+        }
+        val positiveGaps = gaps.filter { it > 0 }
+        if (positiveGaps.size < 2) return sortedDurationsMs
+
+        val typicalGap = median(positiveGaps)
+        if (typicalGap <= 0.0) return sortedDurationsMs
+
+        val unusualGapIndexes = gaps.mapIndexedNotNull { index, gap ->
+            if (gap >= typicalGap * 10) index else null
+        }
+        if (unusualGapIndexes.isEmpty()) return sortedDurationsMs
+
+        var bestFilteredDurationsMs = sortedDurationsMs
+        var bestScore = 0.0
+
+        unusualGapIndexes.forEach { gapIndex ->
+            val lowClusterEnd = gapIndex + 1
+            val highClusterStart = gapIndex + 1
+            val lowCluster = sortedDurationsMs.take(lowClusterEnd)
+            val highCluster = sortedDurationsMs.drop(highClusterStart)
+
+            if (shouldRemoveEdgeCluster(lowCluster, sortedDurationsMs)) {
+                val filteredDurationsMs = sortedDurationsMs.drop(lowClusterEnd)
+                val score = gaps[gapIndex].toDouble() / typicalGap - lowCluster.size
+                if (score > bestScore) {
+                    bestFilteredDurationsMs = filteredDurationsMs
+                    bestScore = score
+                }
+            }
+
+            if (shouldRemoveEdgeCluster(highCluster, sortedDurationsMs)) {
+                val filteredDurationsMs = sortedDurationsMs.take(highClusterStart)
+                val score = gaps[gapIndex].toDouble() / typicalGap - highCluster.size
+                if (score > bestScore) {
+                    bestFilteredDurationsMs = filteredDurationsMs
+                    bestScore = score
+                }
+            }
+        }
+
+        return bestFilteredDurationsMs.ifEmpty { sortedDurationsMs }
+    }
+
+    private fun shouldRemoveEdgeCluster(cluster: List<Long>, values: List<Long>): Boolean {
+        if (cluster.isEmpty()) return false
+
+        if (cluster.size >= values.size / 2.0) return false
+
+        return cluster.size <= 2
+    }
+
+    private fun median(values: List<Long>): Double {
+        val sortedValues = values.sorted()
+        val middleIndex = sortedValues.size / 2
+        return if (sortedValues.size % 2 == 0) {
+            (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2.0
+        } else {
+            sortedValues[middleIndex].toDouble()
+        }
     }
 
     private fun elapsedMilliseconds(startedAt: Long): Long {
         return ((System.nanoTime() - startedAt) / 1_000_000.0).roundToLong().coerceAtLeast(0)
     }
+
+    private data class SummaryEntry(
+        val label: String,
+        val count: Long,
+        val totalDurationMs: Long,
+        val averageDurationMs: Double,
+        val minDurationMs: Long,
+        val maxDurationMs: Long,
+        val filteredMeasurementCount: Int,
+        val filteredMeasurementPercent: Double,
+    )
 
     private data class Measurement(val label: String, val durationMs: Long, val recordedAtMs: Long)
 
@@ -197,6 +329,8 @@ class PerformanceProfiler private constructor(context: Context) {
         private const val FLUSH_DELAY_MS = 5_000L
         private const val MAX_PENDING_MEASUREMENTS = 1_000
         private const val MAX_ROWS = 20_000
+        private const val OUTLIER_PERCENTILE_MIN_MEASUREMENTS = 25
+        private const val OUTLIER_TRIM_RATIO = 0.01
 
         @Volatile
         private var instance: PerformanceProfiler? = null
