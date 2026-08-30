@@ -46,10 +46,7 @@ import com.example.gravimusicplayer.PlayerPreferences
 import com.example.gravimusicplayer.QueueOrder
 import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.TagGroup
-import com.example.gravimusicplayer.WaveformAnalyzer
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -58,7 +55,6 @@ import kotlinx.coroutines.withContext
 fun GraviMusicPlayerApp() {
     val context = LocalContext.current
     val libraryRepository = remember(context) { LibraryRepository(context) }
-    val waveformAnalyzer = remember(context) { WaveformAnalyzer(context) }
     val graviQueuePicker = remember(context) { GraviQueuePicker(context) }
     val preferences = remember(context) { PlayerPreferences(context) }
     val initialSettings = remember(preferences) { preferences.settings }
@@ -104,9 +100,6 @@ fun GraviMusicPlayerApp() {
     var pendingPlaylistExport by remember { mutableStateOf<List<AudioItem>?>(null) }
     var isFolderActionRunning by remember { mutableStateOf(false) }
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
-    var waveformUriString by remember { mutableStateOf<String?>(null) }
-    var waveformValues by remember { mutableStateOf(emptyList<Float>()) }
-    var waveformRequestId by remember { mutableIntStateOf(0) }
     var pendingPerformanceExport by remember { mutableStateOf<String?>(null) }
     var isPerformanceExporting by remember { mutableStateOf(false) }
 
@@ -263,29 +256,6 @@ fun GraviMusicPlayerApp() {
         }
     }
 
-    LaunchedEffect(
-        playbackSnapshot.currentItem?.uriString,
-        playbackSnapshot.currentItem?.lastModifiedMs,
-        playbackSnapshot.currentItem?.sizeBytes,
-    ) {
-        val currentItem = playbackSnapshot.currentItem
-        waveformUriString = currentItem?.uriString
-        waveformValues = emptyList()
-        if (currentItem != null) {
-            val requestUriString = currentItem.uriString
-            val requestId = ++waveformRequestId
-            val values = withContext(Dispatchers.IO) {
-                val coroutineContext = currentCoroutineContext()
-                waveformAnalyzer.waveform(currentItem) {
-                    !coroutineContext.isActive
-                }
-            }
-            if (waveformUriString == requestUriString && waveformRequestId == requestId) {
-                waveformValues = values
-            }
-        }
-    }
-
     AppScaffold(
         currentDestination = currentDestination,
         isGeneratingCache = isGeneratingCache,
@@ -314,9 +284,6 @@ fun GraviMusicPlayerApp() {
                     onRemoveQueueItem = { playbackService?.removeQueueItem(it) },
                     onShuffleQueue = { playbackService?.shuffleQueue() },
                     showThumbnails = showBrowserThumbnails,
-                    waveformValues = waveformValues.takeIf {
-                        waveformUriString == playbackSnapshot.currentItem?.uriString
-                    }.orEmpty(),
                     onLoopModeChanged = {
                         savedLoopMode = it
                         preferences.loopMode = it
@@ -665,8 +632,6 @@ fun GraviMusicPlayerApp() {
                                 },
                                 onClearCaches = {
                                     libraryRepository.clearAllCaches(rootUriString)
-                                    waveformAnalyzer.clearCache()
-                                    waveformValues = emptyList()
                                     browserEntries = emptyList()
                                     tagGroups = emptyList()
                                     cacheGenerationRequest++

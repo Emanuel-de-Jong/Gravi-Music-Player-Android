@@ -6,9 +6,9 @@ data class PlayerSettings(
     val genreSeparator: String = ";",
     val showBrowserThumbnails: Boolean = true,
     val queueSearchResults: Boolean = true,
-    val skipSilenceEnabled: Boolean = true,
-    val loudnessNormalizationEnabled: Boolean = true,
-    val fineGrainedVolumeEnabled: Boolean = true,
+    val skipSilenceEnabled: Boolean = false,
+    val loudnessNormalizationEnabled: Boolean = false,
+    val fineGrainedVolumeEnabled: Boolean = false,
     val graviPickerSettings: GraviPickerSettings = GraviPickerSettings(
         depth = 2,
         parentOdds = true,
