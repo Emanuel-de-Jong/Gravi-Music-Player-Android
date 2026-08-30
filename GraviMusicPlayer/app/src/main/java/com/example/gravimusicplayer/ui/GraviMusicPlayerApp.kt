@@ -315,6 +315,25 @@ fun GraviMusicPlayerApp() {
                     onPlayQueueIndex = { playbackService?.playQueueIndex(it) },
                     onRemoveQueueItem = { playbackService?.removeQueueItem(it) },
                     onShuffleQueue = { playbackService?.shuffleQueue() },
+                    onToggleCurrentFavorite = {
+                        val rootUri = rootUriString
+                        val currentItem = playbackSnapshot.currentItem
+                        if (rootUri != null && currentItem != null) {
+                            coroutineScope.launch {
+                                val updatedFavoriteKeys = withContext(Dispatchers.IO) {
+                                    favoritesRepository.toggleFavorite(
+                                        rootUri,
+                                        currentItem,
+                                        favoritesDeviceId,
+                                    ).favoriteKeys
+                                }
+                                favoriteKeys = updatedFavoriteKeys
+                            }
+                        }
+                    },
+                    onToggleFavoriteQueueFilter = {
+                        playbackService?.toggleFavoriteQueueFilter(favoriteKeys)
+                    },
                     showThumbnails = showBrowserThumbnails,
                     onLoopModeChanged = {
                         savedLoopMode = it

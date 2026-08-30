@@ -55,6 +55,7 @@ class PlaybackService : Service() {
     private var mediaSession: MediaSessionCompat? = null
     private var listener: ((PlaybackSnapshot) -> Unit)? = null
     private var snapshot = PlaybackSnapshot()
+    private var unfilteredFavoriteQueue: List<AudioItem>? = null
     private var connectedBluetoothOutputDeviceIds = emptySet<Int>()
     private var silenceAnalyzer: SilenceAnalyzer? = null
     private var skipSilenceEnabled = false
@@ -225,8 +226,48 @@ class PlaybackService : Service() {
     fun getSnapshot(): PlaybackSnapshot = snapshot
 
     fun setFavoriteKeys(favoriteKeys: Set<String>) {
-        snapshot = snapshot.withFavoriteKeys(favoriteKeys)
+        val updatedSnapshot = snapshot.withFavoriteKeys(favoriteKeys)
+        val unfilteredQueue = unfilteredFavoriteQueue
+        if (updatedSnapshot.isFavoriteQueueFilterEnabled && unfilteredQueue != null) {
+            val updatedUnfilteredQueue = unfilteredQueue.withFavoriteKeys(favoriteKeys)
+            val favoriteQueue = updatedUnfilteredQueue.filter { it.isFavorite }
+            if (favoriteQueue.isEmpty()) {
+                unfilteredFavoriteQueue = null
+                snapshot = updatedSnapshot.copy(
+                    queue = updatedUnfilteredQueue,
+                    currentIndex = updatedSnapshot.currentItem?.let { item ->
+                        updatedUnfilteredQueue.indexOfFirst { it.uriString == item.uriString }
+                    }?.takeIf { it >= 0 } ?: updatedSnapshot.currentIndex.coerceIn(
+                        updatedUnfilteredQueue.indices
+                    ),
+                    isFavoriteQueueFilterEnabled = false,
+                )
+                notifyListener()
+                return
+            }
+
+            val currentItem = updatedSnapshot.currentItem
+            val nextIndex = currentItem?.let { item ->
+                favoriteQueue.indexOfFirst { it.uriString == item.uriString }
+            }?.takeIf { it >= 0 } ?: 0
+            unfilteredFavoriteQueue = updatedUnfilteredQueue
+            snapshot = updatedSnapshot.copy(queue = favoriteQueue, currentIndex = nextIndex)
+            if (currentItem == null || !currentItem.isFavorite) {
+                playIndex(nextIndex)
+                return
+            }
+        } else {
+            snapshot = updatedSnapshot
+        }
         notifyListener()
+    }
+
+    fun toggleFavoriteQueueFilter(favoriteKeys: Set<String>) {
+        if (snapshot.isFavoriteQueueFilterEnabled) {
+            disableFavoriteQueueFilter()
+        } else {
+            enableFavoriteQueueFilter(favoriteKeys)
+        }
     }
 
     fun playQueue(
@@ -252,7 +293,9 @@ class PlaybackService : Service() {
             positionMs = 0,
             durationMs = 0,
             errorMessage = null,
+            isFavoriteQueueFilterEnabled = false,
         )
+        unfilteredFavoriteQueue = null
         playIndex(safeIndex)
     }
 
@@ -310,6 +353,10 @@ class PlaybackService : Service() {
             add(insertionIndex, item)
         }
         snapshot = snapshot.copy(queue = updatedQueue, errorMessage = null)
+        if (snapshot.isFavoriteQueueFilterEnabled) {
+            unfilteredFavoriteQueue = null
+            snapshot = snapshot.copy(isFavoriteQueueFilterEnabled = false)
+        }
         notifyListener()
         if (playImmediately) playIndex(insertionIndex)
     }
@@ -319,6 +366,10 @@ class PlaybackService : Service() {
 
         val updatedQueue = snapshot.queue.toMutableList().apply {
             removeAt(index)
+        }
+        if (snapshot.isFavoriteQueueFilterEnabled) {
+            unfilteredFavoriteQueue = null
+            snapshot = snapshot.copy(isFavoriteQueueFilterEnabled = false)
         }
         if (updatedQueue.isEmpty()) {
             stopPlayback()
@@ -359,6 +410,53 @@ class PlaybackService : Service() {
             queue = shuffledQueue,
             currentIndex = 0,
             queueOrder = QueueOrder.SHUFFLED,
+        )
+        if (snapshot.isFavoriteQueueFilterEnabled) {
+            unfilteredFavoriteQueue = null
+            snapshot = snapshot.copy(isFavoriteQueueFilterEnabled = false)
+        }
+        notifyListener()
+    }
+
+    private fun enableFavoriteQueueFilter(favoriteKeys: Set<String>) {
+        val currentQueue = snapshot.queue.withFavoriteKeys(favoriteKeys)
+        val favoriteQueue = currentQueue.filter { it.isFavorite }
+        if (favoriteQueue.isEmpty()) return
+
+        val currentItem = currentQueue.getOrNull(snapshot.currentIndex)
+        val nextIndex = if (currentItem?.isFavorite == true) {
+            favoriteQueue.indexOfFirst { it.uriString == currentItem.uriString }.coerceAtLeast(0)
+        } else {
+            0
+        }
+        unfilteredFavoriteQueue = currentQueue
+        snapshot = snapshot.copy(
+            queue = favoriteQueue,
+            currentIndex = nextIndex,
+            positionMs = if (currentItem?.isFavorite == true) snapshot.positionMs else 0,
+            durationMs = if (currentItem?.isFavorite == true) snapshot.durationMs else 0,
+            errorMessage = null,
+            isFavoriteQueueFilterEnabled = true,
+        )
+        if (currentItem?.isFavorite == true) {
+            notifyListener()
+        } else {
+            playIndex(nextIndex)
+        }
+    }
+
+    private fun disableFavoriteQueueFilter() {
+        val restoredQueue = unfilteredFavoriteQueue ?: return
+        val currentItem = snapshot.currentItem
+        val restoredIndex = currentItem?.let { item ->
+            restoredQueue.indexOfFirst { it.uriString == item.uriString }
+        }?.takeIf { it >= 0 } ?: snapshot.currentIndex.coerceIn(restoredQueue.indices)
+        unfilteredFavoriteQueue = null
+        snapshot = snapshot.copy(
+            queue = restoredQueue,
+            currentIndex = restoredIndex,
+            errorMessage = null,
+            isFavoriteQueueFilterEnabled = false,
         )
         notifyListener()
     }

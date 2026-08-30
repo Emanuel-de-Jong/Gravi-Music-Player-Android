@@ -110,6 +110,7 @@ data class PlaybackSnapshot(
     val durationMs: Int = 0,
     val audioInfoText: String? = null,
     val errorMessage: String? = null,
+    val isFavoriteQueueFilterEnabled: Boolean = false,
 ) {
     val currentItem: AudioItem?
         get() = queue.getOrNull(currentIndex)

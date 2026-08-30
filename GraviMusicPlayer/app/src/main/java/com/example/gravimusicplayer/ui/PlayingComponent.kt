@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -120,6 +122,8 @@ fun PlayScreen(
     onPlayQueueIndex: (Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
     onShuffleQueue: () -> Unit,
+    onToggleCurrentFavorite: () -> Unit,
+    onToggleFavoriteQueueFilter: () -> Unit,
     showThumbnails: Boolean,
     onLoopModeChanged: (LoopMode) -> Unit,
 ) {
@@ -159,6 +163,12 @@ fun PlayScreen(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+        IconButton(onClick = onToggleCurrentFavorite, enabled = item != null) {
+            Icon(
+                if (item?.isFavorite == true) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                contentDescription = if (item?.isFavorite == true) "Remove favorite" else "Add favorite",
+            )
+        }
         Slider(
             value = snapshot.positionMs.toFloat()
                 .coerceIn(0f, snapshot.durationMs.toFloat().coerceAtLeast(1f)),
@@ -205,6 +215,7 @@ fun PlayScreen(
         PlaybackModeRow(
             snapshot = snapshot,
             onShuffleQueue = onShuffleQueue,
+            onToggleFavoriteQueueFilter = onToggleFavoriteQueueFilter,
             onLoopModeChanged = onLoopModeChanged,
         )
         if (snapshot.errorMessage != null) {
@@ -302,6 +313,7 @@ private fun ArtworkImage(artworkUriString: String?, modifier: Modifier = Modifie
 private fun PlaybackModeRow(
     snapshot: PlaybackSnapshot,
     onShuffleQueue: () -> Unit,
+    onToggleFavoriteQueueFilter: () -> Unit,
     onLoopModeChanged: (LoopMode) -> Unit,
 ) {
     Row(
@@ -311,6 +323,11 @@ private fun PlaybackModeRow(
         ShuffleQueueButton(
             enabled = snapshot.queue.size > 1,
             onShuffleQueue = onShuffleQueue,
+        )
+        FavoriteQueueFilterButton(
+            enabled = snapshot.queue.any { it.isFavorite } || snapshot.isFavoriteQueueFilterEnabled,
+            active = snapshot.isFavoriteQueueFilterEnabled,
+            onToggleFavoriteQueueFilter = onToggleFavoriteQueueFilter,
         )
         LoopModeSelector(snapshot.loopMode, onLoopModeChanged)
     }
@@ -324,6 +341,21 @@ private fun ShuffleQueueButton(
     TextButton(onClick = onShuffleQueue, enabled = enabled) {
         Icon(Icons.Filled.Shuffle, contentDescription = null)
         Text("Shuffle")
+    }
+}
+
+@Composable
+private fun FavoriteQueueFilterButton(
+    enabled: Boolean,
+    active: Boolean,
+    onToggleFavoriteQueueFilter: () -> Unit,
+) {
+    TextButton(onClick = onToggleFavoriteQueueFilter, enabled = enabled) {
+        Icon(
+            if (active) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+            contentDescription = null,
+        )
+        Text("Favorites")
     }
 }
 
@@ -531,6 +563,8 @@ fun PlayScreenPreview() {
             onPlayQueueIndex = {},
             onRemoveQueueItem = {},
             onShuffleQueue = {},
+            onToggleCurrentFavorite = {},
+            onToggleFavoriteQueueFilter = {},
             showThumbnails = false,
             onLoopModeChanged = {},
         )
