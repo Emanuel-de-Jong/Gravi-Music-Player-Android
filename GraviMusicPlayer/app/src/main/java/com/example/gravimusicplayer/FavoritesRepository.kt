@@ -163,7 +163,7 @@ class FavoritesRepository(private val context: Context) {
         writeText(
             syncFolder,
             ANDROID_FAVORITES_FILE,
-            favoritesDocumentJson(updatedDocument).toString(2)
+            favoritesDocumentJson(updatedDocument).toString(2).replace("\\/", "/")
         )
     }
 
