@@ -224,6 +224,11 @@ class PlaybackService : Service() {
 
     fun getSnapshot(): PlaybackSnapshot = snapshot
 
+    fun setFavoriteKeys(favoriteKeys: Set<String>) {
+        snapshot = snapshot.withFavoriteKeys(favoriteKeys)
+        notifyListener()
+    }
+
     fun playQueue(
         queue: List<AudioItem>,
         startIndex: Int,
@@ -727,6 +732,7 @@ class PlaybackService : Service() {
                         durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
                             ?.toLongOrNull(),
                         lyrics = Mp3LyricsReader.readLyrics(this, item.uri),
+                        isrc = item.isrc ?: Mp3IsrcReader.readIsrc(this, item.uri),
                         replayGainTrackGainDb = replayGainMetadata?.trackGainDb,
                         replayGainTrackPeak = replayGainMetadata?.trackPeak,
                     )

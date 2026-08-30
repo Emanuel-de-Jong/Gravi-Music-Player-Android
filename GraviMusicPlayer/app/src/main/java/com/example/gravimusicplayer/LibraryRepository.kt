@@ -186,6 +186,7 @@ class LibraryRepository(private val context: Context) {
                         null,
                         null,
                         null,
+                        null,
                     )
                     metadataCacheChanged = true
                 }
@@ -293,6 +294,7 @@ class LibraryRepository(private val context: Context) {
             lastModifiedMs = lastModifiedMs,
             sizeBytes = sizeBytes,
             metadataTitle = metadataCacheFile?.metadataTitle,
+            isrc = metadataCacheFile?.isrc,
         )
     }
 
@@ -595,6 +597,7 @@ class LibraryRepository(private val context: Context) {
                     file.optString("releaseDate").takeIf { it.isNotBlank() },
                     file.optString("lyrics").takeIf { it.isNotBlank() },
                     file.optString("metadataTitle").takeIf { it.isNotBlank() },
+                    file.optString("isrc").normalizedIsrc(),
                 ).takeIf { it.uriString.isNotBlank() }
             }
         }.getOrDefault(emptyList()).associateBy { it.uriString }.toMutableMap()
@@ -617,6 +620,7 @@ class LibraryRepository(private val context: Context) {
                     .put("releaseDate", file.releaseDate)
                     .put("lyrics", file.lyrics)
                     .put("metadataTitle", file.metadataTitle)
+                    .put("isrc", file.isrc.orEmpty())
             )
         }
         val json = JSONObject()
@@ -654,6 +658,7 @@ class LibraryRepository(private val context: Context) {
                     Mp3LyricsReader.readLyrics(context, uri),
                     retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
                         ?.takeIf { it.isNotBlank() },
+                    Mp3IsrcReader.readIsrc(context, uri),
                 )
             }.getOrNull()
         } finally {
@@ -823,6 +828,7 @@ private data class AudioMetadataCacheFile(
     val releaseDate: String?,
     val lyrics: String?,
     val metadataTitle: String?,
+    val isrc: String?,
 ) {
     fun matches(audioFile: AudioFileSnapshot): Boolean {
         return uriString == audioFile.uriString &&

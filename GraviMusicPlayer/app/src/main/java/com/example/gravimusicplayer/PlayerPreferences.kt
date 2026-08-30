@@ -2,6 +2,7 @@ package com.example.gravimusicplayer
 
 import android.content.Context
 import androidx.core.content.edit
+import java.util.UUID
 
 class PlayerPreferences(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -45,6 +46,16 @@ class PlayerPreferences(context: Context) {
         get() = preferences.getString(KEY_ROOT_URI, null)
         set(value) {
             preferences.edit { putString(KEY_ROOT_URI, value) }
+        }
+
+    val favoritesDeviceId: String
+        get() {
+            val currentValue = preferences.getString(KEY_FAVORITES_DEVICE_ID, null)
+            if (!currentValue.isNullOrBlank()) return currentValue
+
+            val newValue = "android-${UUID.randomUUID()}"
+            preferences.edit { putString(KEY_FAVORITES_DEVICE_ID, newValue) }
+            return newValue
         }
 
     var defaultStartPlayOrder: DefaultStartPlayOrder
@@ -171,8 +182,10 @@ class PlayerPreferences(context: Context) {
 
     fun resetSettingsExceptRootUri() {
         val rootUri = rootUriString
+        val favoritesDeviceId = favoritesDeviceId
         preferences.edit { clear() }
         rootUriString = rootUri
+        preferences.edit { putString(KEY_FAVORITES_DEVICE_ID, favoritesDeviceId) }
     }
 
     private inline fun <reified Mode> loadMode(
@@ -232,6 +245,7 @@ class PlayerPreferences(context: Context) {
     companion object {
         private const val PREFERENCES_NAME = "gravi_music_player"
         private const val KEY_ROOT_URI = "root_uri"
+        private const val KEY_FAVORITES_DEVICE_ID = "favorites_device_id"
         private const val KEY_DEFAULT_START_PLAY_ORDER = "default_start_play_order"
         private const val KEY_LOOP_MODE = "loop_mode"
         private const val KEY_GENRE_SEPARATOR = "genre_separator"

@@ -20,12 +20,61 @@ data class AudioItem(
     val lastModifiedMs: Long = 0,
     val sizeBytes: Long = 0,
     val metadataTitle: String? = null,
+    val isrc: String? = null,
+    val isFavorite: Boolean = false,
 ) {
     val uri: Uri
         get() = uriString.toUri()
 
     val displayTitle: String
         get() = title.substringBeforeLast('.', title)
+}
+
+fun AudioItem.favoritePath(): String {
+    return listOf(folderPath, title)
+        .filter { it.isNotBlank() }
+        .joinToString("/")
+        .normalizedFavoritePath()
+}
+
+fun AudioItem.favoritePathKey(): String {
+    return favoritePath().favoritePathKey()
+}
+
+fun AudioItem.favoriteKey(): String {
+    return isrc.favoriteIsrcKey() ?: favoritePathKey()
+}
+
+fun List<AudioItem>.withFavoriteKeys(favoriteKeys: Set<String>): List<AudioItem> {
+    return map { item -> item.copy(isFavorite = item.favoriteKey() in favoriteKeys) }
+}
+
+fun PlaybackSnapshot.withFavoriteKeys(favoriteKeys: Set<String>): PlaybackSnapshot {
+    return copy(queue = queue.withFavoriteKeys(favoriteKeys))
+}
+
+fun String.normalizedFavoritePath(): String {
+    return replace('\\', '/')
+        .split('/')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .joinToString("/")
+}
+
+fun String.favoritePathKey(): String {
+    return "path:${normalizedFavoritePath().lowercase()}"
+}
+
+fun String?.normalizedIsrc(): String? {
+    val normalizedValue = orEmpty()
+        .trim()
+        .uppercase()
+        .filter { it.isLetterOrDigit() }
+    return normalizedValue.takeIf { it.length >= 5 }
+}
+
+fun String?.favoriteIsrcKey(): String? {
+    return normalizedIsrc()?.let { "isrc:$it" }
 }
 
 data class BrowserEntry(

@@ -36,6 +36,7 @@ import com.example.gravimusicplayer.BrowserEntry
 import com.example.gravimusicplayer.BrowserSortMode
 import com.example.gravimusicplayer.DEFAULT_PLAYER_SETTINGS
 import com.example.gravimusicplayer.DefaultStartPlayOrder
+import com.example.gravimusicplayer.FavoritesRepository
 import com.example.gravimusicplayer.GraviQueuePicker
 import com.example.gravimusicplayer.LibraryRepository
 import com.example.gravimusicplayer.PendingPlaybackRequest
@@ -46,6 +47,8 @@ import com.example.gravimusicplayer.PlayerPreferences
 import com.example.gravimusicplayer.QueueOrder
 import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.TagGroup
+import com.example.gravimusicplayer.favoriteKey
+import com.example.gravimusicplayer.withFavoriteKeys
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,8 +58,10 @@ import kotlinx.coroutines.withContext
 fun GraviMusicPlayerApp() {
     val context = LocalContext.current
     val libraryRepository = remember(context) { LibraryRepository(context) }
+    val favoritesRepository = remember(context) { FavoritesRepository(context) }
     val graviQueuePicker = remember(context) { GraviQueuePicker(context) }
     val preferences = remember(context) { PlayerPreferences(context) }
+    val favoritesDeviceId = remember(preferences) { preferences.favoritesDeviceId }
     val initialSettings = remember(preferences) { preferences.settings }
     val performanceProfiler = remember(context) { PerformanceProfiler.get(context) }
     val coroutineScope = rememberCoroutineScope()
@@ -102,13 +107,15 @@ fun GraviMusicPlayerApp() {
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
     var pendingPerformanceExport by remember { mutableStateOf<String?>(null) }
     var isPerformanceExporting by remember { mutableStateOf(false) }
+    var favoriteKeys by remember { mutableStateOf(emptySet<String>()) }
+    var favoritesRefreshRequest by remember { mutableIntStateOf(0) }
 
     val folderPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
                 rootUriString = uri.toString()
                 preferences.rootUriString = rootUriString
@@ -119,8 +126,10 @@ fun GraviMusicPlayerApp() {
                 appliedGenreSearchQuery = ""
                 browserEntries = emptyList()
                 tagGroups = emptyList()
+                favoriteKeys = emptySet()
                 libraryRepository.clearSessionCache()
                 cacheGenerationRequest++
+                favoritesRefreshRequest++
             }
         }
     val notificationPermissionLauncher =
@@ -165,11 +174,11 @@ fun GraviMusicPlayerApp() {
                 boundService.setSkipSilenceEnabled(skipSilenceEnabled)
                 boundService.setLoudnessNormalizationEnabled(loudnessNormalizationEnabled)
                 boundService.setFineGrainedVolumeEnabled(fineGrainedVolumeEnabled)
-                playbackSnapshot = boundService.getSnapshot()
-                boundService.setListener { playbackSnapshot = it }
+                playbackSnapshot = boundService.getSnapshot().withFavoriteKeys(favoriteKeys)
+                boundService.setListener { playbackSnapshot = it.withFavoriteKeys(favoriteKeys) }
                 pendingPlaybackRequest?.let {
                     boundService.playQueue(
-                        it.queue,
+                        it.queue.withFavoriteKeys(favoriteKeys),
                         it.startIndex,
                         it.queueType,
                         it.queueName,
@@ -206,6 +215,7 @@ fun GraviMusicPlayerApp() {
             isGeneratingCache = false
             browserEntries = emptyList()
             tagGroups = emptyList()
+            favoriteKeys = emptySet()
         } else {
             isGeneratingCache = true
             tagGroups = withContext(Dispatchers.IO) {
@@ -219,6 +229,28 @@ fun GraviMusicPlayerApp() {
             libraryCacheVersion++
             isGeneratingCache = false
         }
+    }
+
+    LaunchedEffect(rootUriString, libraryCacheVersion, favoritesRefreshRequest) {
+        val rootUri = rootUriString
+        favoriteKeys = if (rootUri == null) {
+            emptySet()
+        } else {
+            withContext(Dispatchers.IO) {
+                favoritesRepository.initialize(rootUri, favoritesDeviceId)
+                val allItems = libraryRepository.loadRecursiveAudioItems(rootUri, emptyList())
+                favoritesRepository.refreshAndroidEventPaths(
+                    rootUri,
+                    allItems,
+                    favoritesDeviceId
+                ).favoriteKeys
+            }
+        }
+    }
+
+    LaunchedEffect(favoriteKeys) {
+        playbackService?.setFavoriteKeys(favoriteKeys)
+        playbackSnapshot = playbackSnapshot.withFavoriteKeys(favoriteKeys)
     }
 
     LaunchedEffect(
@@ -362,6 +394,7 @@ fun GraviMusicPlayerApp() {
                                                 QueueType.FOLDER,
                                                 folderQueueName(selectedFolderStack),
                                                 QueueOrder.ORDERED,
+                                                favoriteKeys,
                                             )
                                         } finally {
                                             isFolderActionRunning = false
@@ -390,6 +423,7 @@ fun GraviMusicPlayerApp() {
                                                 QueueType.FOLDER,
                                                 folderQueueName(selectedFolderStack),
                                                 QueueOrder.SHUFFLED,
+                                                favoriteKeys,
                                             )
                                         } finally {
                                             isFolderActionRunning = false
@@ -421,6 +455,7 @@ fun GraviMusicPlayerApp() {
                                                 QueueType.FOLDER,
                                                 folderQueueName(selectedFolderStack),
                                                 QueueOrder.GRAVI_SHUFFLED,
+                                                favoriteKeys,
                                             )
                                         } finally {
                                             isFolderActionRunning = false
@@ -497,6 +532,7 @@ fun GraviMusicPlayerApp() {
                                                 } else {
                                                     QueueOrder.ORDERED
                                                 },
+                                                favoriteKeys,
                                             )
                                         } finally {
                                             isFolderActionRunning = false
@@ -504,10 +540,20 @@ fun GraviMusicPlayerApp() {
                                     }
                                 },
                                 onAddFileToQueue = { entry ->
-                                    entry.audioItem?.let { playbackService?.addToQueue(it, false) }
+                                    entry.audioItem?.let {
+                                        playbackService?.addToQueue(
+                                            it.copy(isFavorite = it.favoriteKey() in favoriteKeys),
+                                            false
+                                        )
+                                    }
                                 },
                                 onAddFileToQueueAndPlay = { entry ->
-                                    entry.audioItem?.let { playbackService?.addToQueue(it, true) }
+                                    entry.audioItem?.let {
+                                        playbackService?.addToQueue(
+                                            it.copy(isFavorite = it.favoriteKey() in favoriteKeys),
+                                            true
+                                        )
+                                    }
                                 },
                             )
 
@@ -547,6 +593,7 @@ fun GraviMusicPlayerApp() {
                                         } else {
                                             QueueOrder.ORDERED
                                         },
+                                        favoriteKeys,
                                     )
                                 },
                             )
@@ -764,11 +811,13 @@ private fun requestPlayback(
     queueType: QueueType,
     queueName: String,
     queueOrder: QueueOrder,
+    favoriteKeys: Set<String>,
 ): PendingPlaybackRequest? {
+    val favoriteQueue = queue.withFavoriteKeys(favoriteKeys)
     PlaybackService.start(context)
-    playbackService?.playQueue(queue, startIndex, queueType, queueName, queueOrder)
+    playbackService?.playQueue(favoriteQueue, startIndex, queueType, queueName, queueOrder)
     return if (playbackService == null) PendingPlaybackRequest(
-        queue,
+        favoriteQueue,
         startIndex,
         queueType,
         queueName,
