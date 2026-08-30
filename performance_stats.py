@@ -45,8 +45,8 @@ def main() -> None:
             }
         )
 
-    entries.sort(key=lambda entry: entry["averageDurationMs"])
-    for entry in entries:
+    rows = []
+    for entry in sorted(entries, key=lambda entry: entry["averageDurationMs"]):
         label = entry["label"]
         kept_count = entry["keptCount"]
         average_duration_ms = entry["averageDurationMs"]
@@ -55,14 +55,28 @@ def main() -> None:
         min_duration_ms = entry["minDurationMs"]
         max_duration_ms = entry["maxDurationMs"]
 
+        rows.append(
+            [
+                f"{label} count: {kept_count}",
+                f"avg: {average_duration_ms:.0f}ms ({duration_seconds:.2f}s)",
+                f"range: {min_duration_ms:.0f}ms - {max_duration_ms:.0f}ms",
+                f"filtered: {filtered_percentage:.1f}%",
+            ]
+        )
+
+    column_widths = [
+        max(len(row[index]) for row in rows) for index in range(len(rows[0]))
+    ]
+    for row in rows:
         print(
-            f"{label} count: {kept_count} | avg: {average_duration_ms:.0f}ms ({duration_seconds:.2f}s) | "
-            f"range: {min_duration_ms:.0f}ms - {max_duration_ms:.0f}ms | filtered: {filtered_percentage:.1f}%"
+            " | ".join(
+                column.ljust(column_widths[index]) for index, column in enumerate(row)
+            )
         )
 
 
 def filter_outliers(durations_ms: list[float]) -> list[float]:
-    if len(durations_ms) >= 10:
+    if len(durations_ms) >= 25:
         return trim_percentiles(durations_ms, 0.01)
 
     return trim_small_sample_outliers(durations_ms)
