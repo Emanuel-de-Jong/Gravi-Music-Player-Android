@@ -767,7 +767,11 @@ fun GraviMusicPlayerApp() {
                 )
             }
             playbackStats?.let { stats ->
-                PlaybackStatsDialog(stats = stats, onDismiss = { playbackStats = null })
+                PlaybackStatsDialog(
+                    stats = stats,
+                    songFileNames = cachedLibraryItems.associate { it.uriString to it.title },
+                    onDismiss = { playbackStats = null },
+                )
             }
         }
     }

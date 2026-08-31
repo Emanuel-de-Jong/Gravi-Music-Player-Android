@@ -244,14 +244,21 @@ fun SettingsScreen(
                 Text("Save debug data")
             }
         }
-        Button(onClick = onShowPlaybackStats) {
-            Text("Show playback stats")
+        Button(
+            onClick = onShowPlaybackStats,
+            modifier = Modifier.fillMaxWidth(0.5f),
+        ) {
+            Text("Playback stats")
         }
     }
 }
 
 @Composable
-fun PlaybackStatsDialog(stats: PlayHistoryStats, onDismiss: () -> Unit) {
+fun PlaybackStatsDialog(
+    stats: PlayHistoryStats,
+    songFileNames: Map<String, String>,
+    onDismiss: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -265,13 +272,14 @@ fun PlaybackStatsDialog(stats: PlayHistoryStats, onDismiss: () -> Unit) {
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text("Qualified songs", fontWeight = FontWeight.Bold)
+                Text("Song stats", fontWeight = FontWeight.Bold)
                 if (stats.songs.isEmpty()) {
-                    Text("No qualified plays yet.")
+                    Text("No plays yet.")
                 } else {
                     stats.songs.forEach { song ->
                         val fileName =
-                            song.uriString.substringAfterLast('/').ifBlank { song.uriString }
+                            songFileNames[song.uriString]
+                                ?: song.uriString.substringAfterLast('/').ifBlank { song.uriString }
                         Text("$fileName — ${song.playCount} plays")
                         if (song.isrc.isNotBlank()) {
                             Text("ISRC: ${song.isrc}", style = MaterialTheme.typography.bodySmall)
