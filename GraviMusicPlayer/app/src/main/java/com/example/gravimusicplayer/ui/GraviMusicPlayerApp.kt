@@ -41,6 +41,8 @@ import com.example.gravimusicplayer.GraviQueuePicker
 import com.example.gravimusicplayer.LibraryRepository
 import com.example.gravimusicplayer.PendingPlaybackRequest
 import com.example.gravimusicplayer.PerformanceProfiler
+import com.example.gravimusicplayer.PlayHistoryRepository
+import com.example.gravimusicplayer.PlayHistoryStats
 import com.example.gravimusicplayer.PlaybackService
 import com.example.gravimusicplayer.PlaybackSnapshot
 import com.example.gravimusicplayer.PlayerPreferences
@@ -64,6 +66,7 @@ fun GraviMusicPlayerApp() {
     val favoritesDeviceId = remember(preferences) { preferences.favoritesDeviceId }
     val initialSettings = remember(preferences) { preferences.settings }
     val performanceProfiler = remember(context) { PerformanceProfiler.get(context) }
+    val playHistoryRepository = remember(context) { PlayHistoryRepository(context) }
     val coroutineScope = rememberCoroutineScope()
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.FOLDERS) }
     var isPlayerExpanded by rememberSaveable { mutableStateOf(false) }
@@ -111,6 +114,7 @@ fun GraviMusicPlayerApp() {
     var favoriteKeys by remember { mutableStateOf(emptySet<String>()) }
     var cachedLibraryItems by remember { mutableStateOf(emptyList<AudioItem>()) }
     var favoritesRefreshRequest by remember { mutableIntStateOf(0) }
+    var playbackStats by remember { mutableStateOf<PlayHistoryStats?>(null) }
 
     val folderPicker =
         rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -734,6 +738,14 @@ fun GraviMusicPlayerApp() {
                                         }
                                     }
                                 },
+                                onShowPlaybackStats = {
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        val stats = playHistoryRepository.stats()
+                                        withContext(Dispatchers.Main) {
+                                            playbackStats = stats
+                                        }
+                                    }
+                                },
                             )
                         }
                     }
@@ -753,6 +765,9 @@ fun GraviMusicPlayerApp() {
                     title = { Text("Saving debug data") },
                     text = { CircularProgressIndicator() },
                 )
+            }
+            playbackStats?.let { stats ->
+                PlaybackStatsDialog(stats = stats, onDismiss = { playbackStats = null })
             }
         }
     }

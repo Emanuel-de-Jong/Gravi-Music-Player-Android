@@ -36,7 +36,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.gravimusicplayer.DefaultStartPlayOrder
 import com.example.gravimusicplayer.GraviPickerSettings
+import com.example.gravimusicplayer.PlayHistoryStats
 import com.example.gravimusicplayer.PlayerSettings
+import com.example.gravimusicplayer.QueueOrder
+import com.example.gravimusicplayer.QueueType
 import com.example.gravimusicplayer.ui.theme.GraviMusicPlayerTheme
 
 @Composable
@@ -64,6 +67,7 @@ fun SettingsScreen(
     onClearCaches: () -> Unit,
     onClearPerformanceData: () -> Unit,
     onExportPerformanceData: () -> Unit,
+    onShowPlaybackStats: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
 
@@ -240,7 +244,61 @@ fun SettingsScreen(
                 Text("Save debug data")
             }
         }
+        Button(onClick = onShowPlaybackStats) {
+            Text("Show playback stats")
+        }
     }
+}
+
+@Composable
+fun PlaybackStatsDialog(stats: PlayHistoryStats, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        title = { Text("Playback stats") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Qualified songs", fontWeight = FontWeight.Bold)
+                if (stats.songs.isEmpty()) {
+                    Text("No qualified plays yet.")
+                } else {
+                    stats.songs.forEach { song ->
+                        val fileName =
+                            song.uriString.substringAfterLast('/').ifBlank { song.uriString }
+                        Text("$fileName — ${song.playCount} plays")
+                        if (song.isrc.isNotBlank()) {
+                            Text("ISRC: ${song.isrc}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                Text("Queue stats", fontWeight = FontWeight.Bold)
+                if (stats.queues.isEmpty()) {
+                    Text("No activated queues yet.")
+                } else {
+                    stats.queues.forEach { queue ->
+                        val sourceType =
+                            QueueType.entries.firstOrNull { it.name == queue.sourceType }
+                                ?.label ?: queue.sourceType
+                        val order =
+                            QueueOrder.entries.firstOrNull { it.name == queue.playOrderMode }
+                                ?.label ?: queue.playOrderMode
+                        Text("$sourceType: ${queue.sourceName}")
+                        Text(
+                            "$order — ${queue.queueCount} uses, ${queue.playCount} qualified plays",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -406,6 +464,7 @@ fun SettingsScreenPreview() {
             onClearCaches = {},
             onClearPerformanceData = {},
             onExportPerformanceData = {},
+            onShowPlaybackStats = {},
         )
     }
 }

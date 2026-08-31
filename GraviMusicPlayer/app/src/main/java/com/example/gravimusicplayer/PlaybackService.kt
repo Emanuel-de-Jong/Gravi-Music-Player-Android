@@ -72,11 +72,14 @@ class PlaybackService : Service() {
     private var handlingTrimmedEnd = false
     private var waitingForSilenceAnalysis = false
     private val performanceProfiler by lazy { PerformanceProfiler.get(this) }
+    private val playHistoryRepository by lazy { PlayHistoryRepository(this) }
+    private val playbackHistoryTracker by lazy { PlaybackHistoryTracker(playHistoryRepository) }
 
     private val progressUpdater = object : Runnable {
         override fun run() {
             player?.let {
                 val currentPosition = safePosition(it)
+                playbackHistoryTracker.observe(currentPosition.toLong(), it.isPlaying)
                 snapshot = snapshot.copy(
                     positionMs = currentPosition,
                     durationMs = safeDuration(it),
@@ -180,6 +183,9 @@ class PlaybackService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(progressUpdater)
+        player?.let {
+            playbackHistoryTracker.finish(safePosition(it).toLong(), it.isPlaying)
+        }
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         unregisterReceiver(becomingNoisyReceiver)
         serviceScope.cancel()
@@ -277,6 +283,9 @@ class PlaybackService : Service() {
         queueName: String,
         queueOrder: QueueOrder,
     ) {
+        player?.let {
+            playbackHistoryTracker.finish(safePosition(it).toLong(), it.isPlaying)
+        }
         if (queue.isEmpty()) {
             snapshot = snapshot.copy(errorMessage = "No audio files found.")
             notifyListener()
@@ -284,6 +293,9 @@ class PlaybackService : Service() {
         }
 
         val safeIndex = startIndex.coerceIn(queue.indices)
+        playbackHistoryTracker.setQueueId(
+            playHistoryRepository.createQueue(queue, queueType, queueName, queueOrder)
+        )
         snapshot = snapshot.copy(
             queue = queue,
             queueType = queueType,
@@ -302,6 +314,7 @@ class PlaybackService : Service() {
     fun togglePlayPause() {
         val currentPlayer = player ?: return
         if (currentPlayer.isPlaying) {
+            playbackHistoryTracker.observe(safePosition(currentPlayer).toLong(), true)
             pausePlayback(currentPlayer)
         } else if (waitingForSilenceAnalysis) {
             return
@@ -392,7 +405,12 @@ class PlaybackService : Service() {
 
     fun seekTo(positionMs: Int) {
         val currentPlayer = player ?: return
+        playbackHistoryTracker.observe(
+            safePosition(currentPlayer).toLong(),
+            currentPlayer.isPlaying
+        )
         currentPlayer.seekTo(positionMs.coerceIn(0, safeDuration(currentPlayer)).toLong())
+        playbackHistoryTracker.resetPosition(safePosition(currentPlayer).toLong())
         snapshot = snapshot.copy(positionMs = safePosition(currentPlayer))
         updateMediaSession()
         notifyListener()
@@ -403,6 +421,13 @@ class PlaybackService : Service() {
 
         val currentQueue = snapshot.queue
         val currentItem = currentQueue.getOrNull(snapshot.currentIndex) ?: return
+        val currentPlayer = player
+        if (currentPlayer != null) {
+            playbackHistoryTracker.finish(
+                safePosition(currentPlayer).toLong(),
+                currentPlayer.isPlaying
+            )
+        }
         val shuffledQueue = listOf(currentItem) + currentQueue
             .filterIndexed { index, _ -> index != snapshot.currentIndex }
             .shuffled()
@@ -411,6 +436,17 @@ class PlaybackService : Service() {
             currentIndex = 0,
             queueOrder = QueueOrder.SHUFFLED,
         )
+        playbackHistoryTracker.setQueueId(
+            playHistoryRepository.createQueue(
+                shuffledQueue,
+                snapshot.queueType ?: QueueType.FOLDER,
+                snapshot.queueName ?: currentItem.folderPath,
+                QueueOrder.SHUFFLED,
+            )
+        )
+        currentPlayer?.let {
+            playbackHistoryTracker.start(currentItem, safePosition(it).toLong())
+        }
         if (snapshot.isFavoriteQueueFilterEnabled) {
             unfilteredFavoriteQueue = null
             snapshot = snapshot.copy(isFavoriteQueueFilterEnabled = false)
@@ -517,6 +553,9 @@ class PlaybackService : Service() {
 
     private fun playIndex(index: Int) {
         performanceProfiler.measure("PlaybackService.playIndex") {
+            player?.let {
+                playbackHistoryTracker.finish(safePosition(it).toLong(), it.isPlaying)
+            }
             val item = snapshot.queue.getOrNull(index) ?: return@measure
             val currentPlayer = player ?: return@measure
             val playbackItem = readPlaybackMetadata(item)
@@ -583,6 +622,9 @@ class PlaybackService : Service() {
             currentPlayer.seekTo(startPositionMs.toLong())
         }
         currentPlayer.play()
+        snapshot.currentItem?.let {
+            playbackHistoryTracker.start(it, safePosition(currentPlayer).toLong())
+        }
         snapshot = snapshot.copy(
             isPlaying = true,
             positionMs = safePosition(currentPlayer),
@@ -600,6 +642,9 @@ class PlaybackService : Service() {
         trimEndPositionMs = null
         handlingTrimmedEnd = false
         waitingForSilenceAnalysis = false
+        player?.let {
+            playbackHistoryTracker.finish(safePosition(it).toLong(), it.isPlaying)
+        }
         player?.stop()
         player?.clearMediaItems()
         mediaSession?.isActive = false
@@ -614,6 +659,10 @@ class PlaybackService : Service() {
     }
 
     private fun pausePlayback(currentPlayer: Player) {
+        playbackHistoryTracker.observe(
+            safePosition(currentPlayer).toLong(),
+            currentPlayer.isPlaying
+        )
         currentPlayer.pause()
         snapshot = snapshot.copy(isPlaying = false, positionMs = safePosition(currentPlayer))
         updateMediaSession()
@@ -639,6 +688,9 @@ class PlaybackService : Service() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            player?.let {
+                playbackHistoryTracker.finish(safePosition(it).toLong(), it.isPlaying)
+            }
             snapshot = snapshot.copy(isPlaying = false, errorMessage = "Unable to play this file.")
             updateForegroundNotification()
             notifyListener()
@@ -665,6 +717,9 @@ class PlaybackService : Service() {
         trimEndPositionMs = null
         handlingTrimmedEnd = false
         waitingForSilenceAnalysis = false
+        player?.let {
+            playbackHistoryTracker.finish(safePosition(it).toLong(), true)
+        }
         if (snapshot.loopMode == LoopMode.SONG) {
             playIndex(snapshot.currentIndex)
             return
