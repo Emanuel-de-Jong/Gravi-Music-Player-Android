@@ -293,9 +293,7 @@ class PlaybackService : Service() {
         }
 
         val safeIndex = startIndex.coerceIn(queue.indices)
-        playbackHistoryTracker.setQueueId(
-            playHistoryRepository.createQueue(queueType, queueName, queueOrder)
-        )
+        playbackHistoryTracker.setQueue(queueType, queueName, queueOrder)
         snapshot = snapshot.copy(
             queue = queue,
             queueType = queueType,
@@ -436,12 +434,10 @@ class PlaybackService : Service() {
             currentIndex = 0,
             queueOrder = QueueOrder.SHUFFLED,
         )
-        playbackHistoryTracker.setQueueId(
-            playHistoryRepository.createQueue(
-                snapshot.queueType ?: QueueType.FOLDER,
-                snapshot.queueName ?: currentItem.folderPath,
-                QueueOrder.SHUFFLED,
-            )
+        playbackHistoryTracker.setQueue(
+            snapshot.queueType ?: QueueType.FOLDER,
+            snapshot.queueName ?: currentItem.folderPath,
+            QueueOrder.SHUFFLED,
         )
         currentPlayer?.let {
             playbackHistoryTracker.start(currentItem, safePosition(it).toLong())

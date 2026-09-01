@@ -23,74 +23,43 @@ data class PlayHistoryStats(
     val queues: List<PlayHistoryQueueStats>,
 )
 
+data class PlayHistoryQueue(
+    val type: QueueType,
+    val name: String,
+    val order: QueueOrder,
+    val createdAtMs: Long,
+)
+
 class PlayHistoryRepository(context: Context) {
     private val databaseHelper = PlayHistoryDatabase(context.applicationContext)
 
-    fun createQueue(
-        queueType: QueueType,
-        queueName: String,
-        queueOrder: QueueOrder,
-    ): Long {
-        val nowMs = System.currentTimeMillis()
-        val database = databaseHelper.writableDatabase
-        database.beginTransaction()
-        try {
-            val queueId = database.compileStatement(
-                """
-                INSERT INTO play_history_queues(
-                    source_type, source_name, play_order_mode, created_at_ms
-                ) VALUES (?, ?, ?, ?)
-                """.trimIndent()
-            ).apply {
-                bindString(1, queueType.name)
-                bindString(2, queueName)
-                bindString(3, queueOrder.name)
-                bindLong(4, nowMs)
-            }.executeInsert()
-            database.setTransactionSuccessful()
-            return queueId
-        } finally {
-            database.endTransaction()
-        }
-    }
-
     fun recordQualifiedPlay(
         item: AudioItem,
+        queue: PlayHistoryQueue?,
         queueId: Long?,
         startedAtMs: Long,
         listenedDurationMs: Long,
-    ) {
-        if (listenedDurationMs <= 0) return
+    ): Long? {
+        if (listenedDurationMs <= 0) return queueId
 
-        val nowMs = System.currentTimeMillis()
         val database = databaseHelper.writableDatabase
         database.beginTransaction()
         try {
-            val songId = ensureSong(database, item, nowMs)
+            val songId = ensureSong(database, item)
+            val savedQueueId = queueId ?: queue?.let { createQueue(database, it) }
             database.compileStatement(
                 """
-                INSERT INTO play_history_plays(
-                    song_id, queue_id, started_at_ms, listened_duration_ms, created_at_ms
-                ) VALUES (?, ?, ?, ?, ?)
+                INSERT INTO play_history_plays(song_id, queue_id, started_at_ms, listened_duration_ms)
+                VALUES (?, ?, ?, ?)
                 """.trimIndent()
             ).apply {
                 bindLong(1, songId)
-                if (queueId == null) bindNull(2) else bindLong(2, queueId)
+                if (savedQueueId == null) bindNull(2) else bindLong(2, savedQueueId)
                 bindLong(3, startedAtMs)
                 bindLong(4, listenedDurationMs)
-                bindLong(5, nowMs)
             }.executeInsert()
-            if (queueId != null) {
-                database.execSQL(
-                    """
-                    UPDATE play_history_queues
-                    SET activated_at_ms = COALESCE(activated_at_ms, ?)
-                    WHERE id = ?
-                    """.trimIndent(),
-                    arrayOf(nowMs, queueId),
-                )
-            }
             database.setTransactionSuccessful()
+            return savedQueueId
         } finally {
             database.endTransaction()
         }
@@ -136,7 +105,6 @@ class PlayHistoryRepository(context: Context) {
             FROM play_history_queues
             INNER JOIN play_history_plays
                 ON play_history_plays.queue_id = play_history_queues.id
-            WHERE play_history_queues.activated_at_ms IS NOT NULL
             GROUP BY source_type, source_name, play_order_mode
             HAVING play_count > 0
             ORDER BY play_count DESC, queue_count DESC, source_name COLLATE NOCASE
@@ -163,21 +131,35 @@ class PlayHistoryRepository(context: Context) {
         return PlayHistoryStats(songStats(), queueStats())
     }
 
-    private fun ensureSong(database: SQLiteDatabase, item: AudioItem, nowMs: Long): Long {
+    private fun createQueue(database: SQLiteDatabase, queue: PlayHistoryQueue): Long {
+        return database.compileStatement(
+            """
+            INSERT INTO play_history_queues(source_type, source_name, play_order_mode, created_at_ms)
+            VALUES (?, ?, ?, ?)
+            """.trimIndent()
+        ).apply {
+            bindString(1, queue.type.name)
+            bindString(2, queue.name)
+            bindString(3, queue.order.name)
+            bindLong(4, queue.createdAtMs)
+        }.executeInsert()
+    }
+
+    private fun ensureSong(database: SQLiteDatabase, item: AudioItem): Long {
         database.execSQL(
             """
-            INSERT OR IGNORE INTO play_history_songs(uri_string, isrc, created_at_ms, updated_at_ms)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO play_history_songs(uri_string, isrc)
+            VALUES (?, ?)
             """.trimIndent(),
-            arrayOf(item.uriString, item.isrc.orEmpty(), nowMs, nowMs),
+            arrayOf(item.uriString, item.isrc.orEmpty()),
         )
         database.execSQL(
             """
             UPDATE play_history_songs
-            SET isrc = ?, updated_at_ms = ?
+            SET isrc = ?
             WHERE uri_string = ?
             """.trimIndent(),
-            arrayOf(item.isrc.orEmpty(), nowMs, item.uriString),
+            arrayOf(item.isrc.orEmpty(), item.uriString),
         )
         return database.rawQuery(
             "SELECT id FROM play_history_songs WHERE uri_string = ?",
@@ -195,12 +177,11 @@ class PlayHistoryRepository(context: Context) {
         }
 
         override fun onCreate(database: SQLiteDatabase) {
-            database.execSQL("CREATE TABLE play_history_songs (id INTEGER PRIMARY KEY, uri_string TEXT NOT NULL UNIQUE, isrc TEXT NOT NULL DEFAULT '', created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL)")
-            database.execSQL("CREATE TABLE play_history_queues (id INTEGER PRIMARY KEY, source_type TEXT NOT NULL, source_name TEXT NOT NULL, play_order_mode TEXT NOT NULL, created_at_ms INTEGER NOT NULL, activated_at_ms INTEGER)")
-            database.execSQL("CREATE TABLE play_history_plays (id INTEGER PRIMARY KEY, song_id INTEGER NOT NULL, queue_id INTEGER, started_at_ms INTEGER NOT NULL, listened_duration_ms INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, FOREIGN KEY(song_id) REFERENCES play_history_songs(id) ON DELETE CASCADE, FOREIGN KEY(queue_id) REFERENCES play_history_queues(id) ON DELETE SET NULL)")
+            database.execSQL("CREATE TABLE play_history_songs (id INTEGER PRIMARY KEY, uri_string TEXT NOT NULL UNIQUE, isrc TEXT NOT NULL DEFAULT '')")
+            database.execSQL("CREATE TABLE play_history_queues (id INTEGER PRIMARY KEY, source_type TEXT NOT NULL, source_name TEXT NOT NULL, play_order_mode TEXT NOT NULL, created_at_ms INTEGER NOT NULL)")
+            database.execSQL("CREATE TABLE play_history_plays (id INTEGER PRIMARY KEY, song_id INTEGER NOT NULL, queue_id INTEGER, started_at_ms INTEGER NOT NULL, listened_duration_ms INTEGER NOT NULL, FOREIGN KEY(song_id) REFERENCES play_history_songs(id) ON DELETE CASCADE, FOREIGN KEY(queue_id) REFERENCES play_history_queues(id) ON DELETE SET NULL)")
             database.execSQL("CREATE INDEX play_history_songs_isrc_index ON play_history_songs(isrc)")
             database.execSQL("CREATE INDEX play_history_queues_source_index ON play_history_queues(source_type, source_name, play_order_mode)")
-            database.execSQL("CREATE INDEX play_history_queues_activated_index ON play_history_queues(activated_at_ms)")
             database.execSQL("CREATE INDEX play_history_plays_song_index ON play_history_plays(song_id, started_at_ms)")
             database.execSQL("CREATE INDEX play_history_plays_queue_index ON play_history_plays(queue_id, started_at_ms)")
         }

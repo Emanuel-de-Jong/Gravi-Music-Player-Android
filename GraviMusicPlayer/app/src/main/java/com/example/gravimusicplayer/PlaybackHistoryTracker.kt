@@ -2,6 +2,7 @@ package com.example.gravimusicplayer
 
 class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
     private var queueId: Long? = null
+    private var queue: PlayHistoryQueue? = null
     private var item: AudioItem? = null
     private var startedAtMs: Long? = null
     private var lastPositionMs: Long? = null
@@ -9,8 +10,9 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
     private var qualified = false
     private var recorded = false
 
-    fun setQueueId(value: Long?) {
-        queueId = value
+    fun setQueue(type: QueueType, name: String, order: QueueOrder) {
+        queueId = null
+        queue = PlayHistoryQueue(type, name, order, System.currentTimeMillis())
     }
 
     fun start(item: AudioItem, positionMs: Long) {
@@ -51,8 +53,9 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
         val currentItem = item
         val currentStartedAtMs = startedAtMs
         if (!recorded && qualified && currentItem != null && currentStartedAtMs != null) {
-            repository.recordQualifiedPlay(
+            queueId = repository.recordQualifiedPlay(
                 currentItem,
+                queue,
                 queueId,
                 currentStartedAtMs,
                 listenedDurationMs,

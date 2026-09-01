@@ -288,7 +288,7 @@ fun PlaybackStatsDialog(
                 }
                 Text("Queue stats", fontWeight = FontWeight.Bold)
                 if (stats.queues.isEmpty()) {
-                    Text("No activated queues yet.")
+                    Text("No queues yet.")
                 } else {
                     stats.queues.forEach { queue ->
                         val sourceType =
@@ -299,7 +299,7 @@ fun PlaybackStatsDialog(
                                 ?.label ?: queue.playOrderMode
                         Text("$sourceType: ${queue.sourceName}")
                         Text(
-                            "$order — ${queue.queueCount} uses, ${queue.playCount} qualified plays",
+                            "$order — ${queue.queueCount} uses, ${queue.playCount} plays",
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
