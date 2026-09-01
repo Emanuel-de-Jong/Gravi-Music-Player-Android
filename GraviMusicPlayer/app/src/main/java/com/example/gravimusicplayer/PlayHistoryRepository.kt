@@ -4,11 +4,6 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
-data class ListeningSegment(
-    val startPositionMs: Long,
-    val durationMs: Long,
-)
-
 data class PlayHistorySongStats(
     val uriString: String,
     val isrc: String,
@@ -32,7 +27,6 @@ class PlayHistoryRepository(context: Context) {
     private val databaseHelper = PlayHistoryDatabase(context.applicationContext)
 
     fun createQueue(
-        queue: List<AudioItem>,
         queueType: QueueType,
         queueName: String,
         queueOrder: QueueOrder,
@@ -53,16 +47,6 @@ class PlayHistoryRepository(context: Context) {
                 bindString(3, queueOrder.name)
                 bindLong(4, nowMs)
             }.executeInsert()
-            queue.forEachIndexed { position, item ->
-                val songId = ensureSong(database, item, nowMs)
-                database.execSQL(
-                    """
-                    INSERT INTO play_history_queue_items(queue_id, song_id, position)
-                    VALUES (?, ?, ?)
-                    """.trimIndent(),
-                    arrayOf(queueId, songId, position),
-                )
-            }
             database.setTransactionSuccessful()
             return queueId
         } finally {
@@ -74,9 +58,8 @@ class PlayHistoryRepository(context: Context) {
         item: AudioItem,
         queueId: Long?,
         startedAtMs: Long,
-        segments: List<ListeningSegment>,
+        listenedDurationMs: Long,
     ) {
-        val listenedDurationMs = segments.sumOf { it.durationMs }
         if (listenedDurationMs <= 0) return
 
         val nowMs = System.currentTimeMillis()
@@ -84,7 +67,7 @@ class PlayHistoryRepository(context: Context) {
         database.beginTransaction()
         try {
             val songId = ensureSong(database, item, nowMs)
-            val playId = database.compileStatement(
+            database.compileStatement(
                 """
                 INSERT INTO play_history_plays(
                     song_id, queue_id, started_at_ms, listened_duration_ms, created_at_ms
@@ -97,16 +80,6 @@ class PlayHistoryRepository(context: Context) {
                 bindLong(4, listenedDurationMs)
                 bindLong(5, nowMs)
             }.executeInsert()
-            segments.forEach { segment ->
-                database.execSQL(
-                    """
-                    INSERT INTO play_history_listening_segments(
-                        play_id, start_position_ms, duration_ms
-                    ) VALUES (?, ?, ?)
-                    """.trimIndent(),
-                    arrayOf(playId, segment.startPositionMs, segment.durationMs),
-                )
-            }
             if (queueId != null) {
                 database.execSQL(
                     """
@@ -224,16 +197,12 @@ class PlayHistoryRepository(context: Context) {
         override fun onCreate(database: SQLiteDatabase) {
             database.execSQL("CREATE TABLE play_history_songs (id INTEGER PRIMARY KEY, uri_string TEXT NOT NULL UNIQUE, isrc TEXT NOT NULL DEFAULT '', created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL)")
             database.execSQL("CREATE TABLE play_history_queues (id INTEGER PRIMARY KEY, source_type TEXT NOT NULL, source_name TEXT NOT NULL, play_order_mode TEXT NOT NULL, created_at_ms INTEGER NOT NULL, activated_at_ms INTEGER)")
-            database.execSQL("CREATE TABLE play_history_queue_items (queue_id INTEGER NOT NULL, song_id INTEGER NOT NULL, position INTEGER NOT NULL, FOREIGN KEY(queue_id) REFERENCES play_history_queues(id) ON DELETE CASCADE, FOREIGN KEY(song_id) REFERENCES play_history_songs(id) ON DELETE CASCADE, PRIMARY KEY(queue_id, position))")
             database.execSQL("CREATE TABLE play_history_plays (id INTEGER PRIMARY KEY, song_id INTEGER NOT NULL, queue_id INTEGER, started_at_ms INTEGER NOT NULL, listened_duration_ms INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, FOREIGN KEY(song_id) REFERENCES play_history_songs(id) ON DELETE CASCADE, FOREIGN KEY(queue_id) REFERENCES play_history_queues(id) ON DELETE SET NULL)")
-            database.execSQL("CREATE TABLE play_history_listening_segments (id INTEGER PRIMARY KEY, play_id INTEGER NOT NULL, start_position_ms INTEGER NOT NULL, duration_ms INTEGER NOT NULL, FOREIGN KEY(play_id) REFERENCES play_history_plays(id) ON DELETE CASCADE)")
             database.execSQL("CREATE INDEX play_history_songs_isrc_index ON play_history_songs(isrc)")
             database.execSQL("CREATE INDEX play_history_queues_source_index ON play_history_queues(source_type, source_name, play_order_mode)")
             database.execSQL("CREATE INDEX play_history_queues_activated_index ON play_history_queues(activated_at_ms)")
-            database.execSQL("CREATE INDEX play_history_queue_items_song_index ON play_history_queue_items(song_id)")
             database.execSQL("CREATE INDEX play_history_plays_song_index ON play_history_plays(song_id, started_at_ms)")
             database.execSQL("CREATE INDEX play_history_plays_queue_index ON play_history_plays(queue_id, started_at_ms)")
-            database.execSQL("CREATE INDEX play_history_listening_segments_play_index ON play_history_listening_segments(play_id)")
         }
 
         override fun onUpgrade(database: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit

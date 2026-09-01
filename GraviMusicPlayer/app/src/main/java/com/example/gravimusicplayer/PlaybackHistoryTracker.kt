@@ -5,7 +5,7 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
     private var item: AudioItem? = null
     private var startedAtMs: Long? = null
     private var lastPositionMs: Long? = null
-    private val segments = mutableListOf<ListeningSegment>()
+    private var listenedDurationMs = 0L
     private var qualified = false
     private var recorded = false
 
@@ -17,7 +17,7 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
         this.item = item
         startedAtMs = System.currentTimeMillis()
         lastPositionMs = positionMs.coerceAtLeast(0)
-        segments.clear()
+        listenedDurationMs = 0
         qualified = false
         recorded = false
     }
@@ -36,7 +36,7 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
             return
         }
 
-        addSegment(previousPositionMs, deltaMs)
+        listenedDurationMs += deltaMs
         lastPositionMs = safePositionMs
         updateQualification()
     }
@@ -55,24 +55,11 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
                 currentItem,
                 queueId,
                 currentStartedAtMs,
-                segments.toList()
+                listenedDurationMs,
             )
             recorded = true
         }
         clearSession()
-    }
-
-    private fun addSegment(startPositionMs: Long, durationMs: Long) {
-        val previousSegment = segments.lastOrNull()
-        if (previousSegment != null &&
-            previousSegment.startPositionMs + previousSegment.durationMs == startPositionMs
-        ) {
-            segments[segments.lastIndex] = previousSegment.copy(
-                durationMs = previousSegment.durationMs + durationMs,
-            )
-        } else {
-            segments += ListeningSegment(startPositionMs, durationMs)
-        }
     }
 
     private fun updateQualification() {
@@ -80,7 +67,7 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
 
         val thresholdMs = item?.durationMs?.takeIf { it > 0 }?.coerceAtMost(QUALIFICATION_MS)
             ?: QUALIFICATION_MS
-        if (segments.sumOf { it.durationMs } >= thresholdMs) {
+        if (listenedDurationMs >= thresholdMs) {
             qualified = true
         }
     }
@@ -89,13 +76,13 @@ class PlaybackHistoryTracker(private val repository: PlayHistoryRepository) {
         item = null
         startedAtMs = null
         lastPositionMs = null
-        segments.clear()
+        listenedDurationMs = 0
         qualified = false
         recorded = false
     }
 
     private companion object {
         const val QUALIFICATION_MS = 30_000L
-        const val SEEK_GAP_TOLERANCE_MS = 5_000L
+        const val SEEK_GAP_TOLERANCE_MS = 2_500L
     }
 }
