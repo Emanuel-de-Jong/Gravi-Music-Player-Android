@@ -3,6 +3,9 @@ package com.example.gravimusicplayer
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import java.io.OutputStream
+
+private const val PLAY_HISTORY_DATABASE_NAME = "play_history.db"
 
 data class PlayHistorySongStats(
     val uriString: String,
@@ -31,6 +34,7 @@ data class PlayHistoryQueue(
 )
 
 class PlayHistoryRepository(context: Context) {
+    private val appContext = context.applicationContext
     private val databaseHelper = PlayHistoryDatabase(context.applicationContext)
 
     fun recordQualifiedPlay(
@@ -131,6 +135,17 @@ class PlayHistoryRepository(context: Context) {
         return PlayHistoryStats(songStats(), queueStats())
     }
 
+    fun exportDatabase(outputStream: OutputStream) {
+        databaseHelper.writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL)", null)
+            .use { cursor ->
+                cursor.moveToFirst()
+            }
+        databaseHelper.close()
+        appContext.getDatabasePath(PLAY_HISTORY_DATABASE_NAME).inputStream().use { inputStream ->
+            inputStream.copyTo(outputStream)
+        }
+    }
+
     private fun createQueue(database: SQLiteDatabase, queue: PlayHistoryQueue): Long {
         return database.compileStatement(
             """
@@ -171,7 +186,7 @@ class PlayHistoryRepository(context: Context) {
     }
 
     private class PlayHistoryDatabase(context: Context) :
-        SQLiteOpenHelper(context, "play_history.db", null, 1) {
+        SQLiteOpenHelper(context, PLAY_HISTORY_DATABASE_NAME, null, 1) {
         override fun onConfigure(database: SQLiteDatabase) {
             database.setForeignKeyConstraintsEnabled(true)
         }

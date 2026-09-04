@@ -110,6 +110,7 @@ fun GraviMusicPlayerApp() {
     var mediaLibraryPermissionVersion by remember { mutableIntStateOf(0) }
     var pendingPerformanceExport by remember { mutableStateOf<String?>(null) }
     var isPerformanceExporting by remember { mutableStateOf(false) }
+    var isPlaybackHistoryExporting by remember { mutableStateOf(false) }
     var favoriteSyncEnabled by remember { mutableStateOf(false) }
     var favoriteKeys by remember { mutableStateOf(emptySet<String>()) }
     var cachedLibraryItems by remember { mutableStateOf(emptyList<AudioItem>()) }
@@ -168,6 +169,23 @@ fun GraviMusicPlayerApp() {
                 }
             } else {
                 isPerformanceExporting = false
+            }
+        }
+    val playHistoryExporter =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.sqlite3")) { uri ->
+            if (uri != null) {
+                coroutineScope.launch(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                            playHistoryRepository.exportDatabase(outputStream)
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        isPlaybackHistoryExporting = false
+                    }
+                }
+            } else {
+                isPlaybackHistoryExporting = false
             }
         }
 
@@ -746,6 +764,10 @@ fun GraviMusicPlayerApp() {
                                         }
                                     }
                                 },
+                                onExportPlaybackHistory = {
+                                    isPlaybackHistoryExporting = true
+                                    playHistoryExporter.launch("play_history.db")
+                                },
                             )
                         }
                     }
@@ -763,6 +785,14 @@ fun GraviMusicPlayerApp() {
                     onDismissRequest = {},
                     confirmButton = {},
                     title = { Text("Saving debug data") },
+                    text = { CircularProgressIndicator() },
+                )
+            }
+            if (isPlaybackHistoryExporting) {
+                AlertDialog(
+                    onDismissRequest = {},
+                    confirmButton = {},
+                    title = { Text("Saving history db") },
                     text = { CircularProgressIndicator() },
                 )
             }

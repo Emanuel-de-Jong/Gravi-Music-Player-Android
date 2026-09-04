@@ -68,6 +68,7 @@ fun SettingsScreen(
     onClearPerformanceData: () -> Unit,
     onExportPerformanceData: () -> Unit,
     onShowPlaybackStats: () -> Unit,
+    onExportPlaybackHistory: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
 
@@ -241,14 +242,26 @@ fun SettingsScreen(
                 onClick = onExportPerformanceData,
                 modifier = Modifier.weight(1f),
             ) {
-                Text("Save debug data")
+                Text("Export debug data")
             }
         }
-        Button(
-            onClick = onShowPlaybackStats,
-            modifier = Modifier.fillMaxWidth(0.5f),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Playback stats")
+            Button(
+                onClick = onShowPlaybackStats,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Show play stats")
+            }
+            Button(
+                onClick = onExportPlaybackHistory,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Export play stats")
+            }
         }
     }
 }
@@ -473,6 +486,7 @@ fun SettingsScreenPreview() {
             onClearPerformanceData = {},
             onExportPerformanceData = {},
             onShowPlaybackStats = {},
+            onExportPlaybackHistory = {},
         )
     }
 }
